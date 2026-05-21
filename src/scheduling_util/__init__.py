@@ -1,3 +1,4 @@
+from ._example_commands import hello
 from ._last_run import LastRun, create_run_predicate, LastRunState
 from ._logging_util import (
     attach_extra_callbacks_to_log_formatter,
@@ -13,6 +14,7 @@ __all__ = [
     "attach_extra_callbacks_to_log_formatter",
     "create_run_predicate",
     "error_to_slack",
+    "hello",
     "LastRun",
     "LastRunState",
     "LogRedactor",
