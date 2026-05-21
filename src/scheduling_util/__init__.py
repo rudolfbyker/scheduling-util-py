@@ -8,6 +8,7 @@ from ._logging_util import (
 )
 from ._rate_limiter import RateLimiter
 from ._schedule import schedule, repeat
+from ._schedule_cli import schedule_cli
 from ._send_errors_to_slack import send_errors_to_slack, error_to_slack
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "RateLimiter",
     "repeat",
     "schedule",
+    "schedule_cli",
     "send_errors_to_slack",
     "stream_logs_to_jsonl_file",
     "stream_logs_to_stderr",
