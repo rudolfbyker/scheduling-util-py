@@ -64,14 +64,16 @@ click_option__hc_manage_key = click.option(
 
 click_option__hc_timeout = click.option(
     "--hc-timeout",
-    required=True,
+    default="1d",
+    show_default=True,
     type=Duration(),
     help="The timeout for the health check. Examples: `5m`, `1h`, `2d`, `1w`.",
 )
 
 click_option__hc_grace = click.option(
     "--hc-grace",
-    required=True,
+    default="2d",
+    show_default=True,
     type=Duration(),
     help="The grace period for the health check. Examples: `5m`, `1h`, `2d`, `1w`. Should be longer than the timeout.",
 )
