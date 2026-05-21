@@ -260,7 +260,7 @@ def subprocess(
         run_with_logger(
             args=args,
             shell=shell,
-            logger=logger,
+            logger=logger.getChild("subprocess"),
             level=getLevelNamesMapping().get(log_level, INFO),
             check=check,
         )
