@@ -149,10 +149,17 @@ def schedule_cli(
     help="The Click command to import and invoke. "
     "Use the same syntax as you would in the `project.scripts` section of `pyproject.toml`.",
 )
+@click.option(
+    "--auto-envvar-prefix",
+    default=None,
+    help="Control how the invoked command reads environment variables. "
+    "See the Click documentation.",
+)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def click_invoke(
     *,
     command_str: str,
+    auto_envvar_prefix: str | None,
     args: Tuple[str],
 ) -> Callable[[], None]:
     """
@@ -181,6 +188,7 @@ def click_invoke(
             command.name,
             list(args),
             parent=None,  # Don't make our command the parent of this command, to keep things separated.
+            auto_envvar_prefix=auto_envvar_prefix,
         ) as command_context:
             command.invoke(command_context)
 
