@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from .subprocess_util import assert_process_result
 
 repo_dir = Path(__file__).resolve().parent.parent
-schedule_script_path = repo_dir / "src/scheduling_util/_schedule_cli.py"
+schedule_script_path = repo_dir / "scripts/schedule.py"
 
 
 class TestScheduleCli(unittest.TestCase):
