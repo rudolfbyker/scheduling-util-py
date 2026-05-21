@@ -153,9 +153,6 @@ def schedule_cli(
     """
     This script runs as a daemon, executing a command or Python code at a regular interval,
     and reporting the results to `healthchecks.io`.
-
-    All options for this script can be set via environment variables.
-    The environment variables must be prefixed with `AA_` and use uppercase letters and underscores.
     """
     if command is None and py_exec is None:
         raise click.UsageError("Either --command or --py-exec must be provided.")
