@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import timedelta
 from logging import getLogger
 from pathlib import Path
@@ -7,7 +8,7 @@ from time import sleep
 from typing import Literal, Callable, Any
 from uuid import uuid4
 
-from hcio_client import HealthChecks
+from hcio_client import HealthChecks, HealthCheck
 
 from ._last_run import create_run_predicate, LastRun
 from ._rate_limiter import RateLimiter
@@ -22,10 +23,11 @@ def schedule(
     hc_manage_key: str | None,
     hc_timeout: timedelta | None,
     hc_grace: timedelta | None,
+    hc_uuid: str | None,
     interval: timedelta,
     max_runs: int | None,
     heartbeat_file: Path | None,
-    slug: str,
+    name: str,
     description: str | None,
     last_run_dir: Path,
     last_run_reset: bool,
@@ -43,12 +45,21 @@ def schedule(
     Args:
         hc_ping_key: The ping key for `healthchecks.io`.
         hc_manage_key: The manage key for `healthchecks.io`.
-        hc_timeout: The timeout for the health check. If a run takes longer than this, it will be marked as failed.
-        hc_grace: The grace period for the health check. If a run fails, it will be given this much time to succeed before the next run is allowed to start.
+        hc_timeout:
+            The timeout for the health check.
+            If a run takes longer than this, it will be marked as failed.
+        hc_grace:
+            The grace period for the health check.
+            If a run fails, it will be given this much time to succeed before the next run is allowed to start.
+        hc_uuid:
+            The UUID of the health check.
+            This can be used to send pings when we don't have a ping key.
         interval: The amount of time to wait between runs.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
         heartbeat_file: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
-        slug: A short name describing the task. Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
+        name:
+            A short name describing the task.
+            Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
         description: A description for the health check. Used for `healthchecks.io` and in Slack messages.
         last_run_dir: The directory in which to store the `LastRun` state files.
         last_run_reset: Whether to ignore the existing `LastRun` state files on the disk and start anew.
@@ -84,13 +95,19 @@ def schedule(
             )
             hc_grace = None
 
-    check = hc.check(
-        run_id=uuid4(),
-        slug=slug,
-        desc=description,
-        timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
-        grace=int(hc_grace.total_seconds()) if hc_grace else None,
-        suppress_on_exit=False,
+    check: HealthCheck | None = (
+        hc.check(
+            run_id=uuid4(),
+            slug=name,
+            uuid=hc_uuid,
+            desc=description,
+            timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
+            grace=int(hc_grace.total_seconds()) if hc_grace else None,
+            suppress_on_exit=False,
+        )
+        # To send health check pings, we need the UUID of the check, or a ping key and the slug.
+        if (hc_uuid or (hc_ping_key and name))
+        else None
     )
 
     predicate = create_run_predicate(
@@ -102,13 +119,13 @@ def schedule(
     )
 
     last_run_dir.mkdir(parents=True, exist_ok=True)
-    last_run_path = last_run_dir / f"{slug}.json"
+    last_run_path = last_run_dir / f"{name}.json"
     if last_run_reset:
         last_run_path.unlink(missing_ok=True)
     last_run = LastRun(path=last_run_path)
 
     def hc_func() -> None:
-        with check:
+        with check or nullcontext():
             func()
 
     wrapped_function = last_run.wrap(f=hc_func, should_run=predicate)

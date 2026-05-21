@@ -52,10 +52,14 @@ click_option__cache_dir = click.option(
     help="Directory for cache files.",
 )
 
+what_is_needed_to_ping = (
+    "To ping a health check, we need (the UUID) || (the slug && the ping key)."
+)
+
 click_option__hc_ping_key = click.option(
     "--hc-ping-key",
     required=False,
-    help="The `healthchecks.io` ping key.",
+    help=f"The `healthchecks.io` ping key. {what_is_needed_to_ping}",
 )
 
 click_option__hc_manage_key = click.option(
@@ -76,6 +80,13 @@ click_option__hc_grace = click.option(
     required=False,
     type=Duration(),
     help="The grace period for the health check. Examples: `5m`, `1h`, `2d`, `1w`. Should be longer than the timeout.",
+)
+
+click_option__hc_uuid = click.option(
+    "--hc-uuid",
+    required=False,
+    type=Duration(),
+    help=f"The UUID of the health check. {what_is_needed_to_ping}",
 )
 
 click_option__heartbeat_file = click.option(
