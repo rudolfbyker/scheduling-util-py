@@ -20,8 +20,8 @@ def schedule(
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
-    hc_timeout: timedelta,
-    hc_grace: timedelta,
+    hc_timeout: timedelta | None,
+    hc_grace: timedelta | None,
     interval: timedelta,
     max_runs: int | None,
     heartbeat_file: Path | None,
@@ -67,12 +67,29 @@ def schedule(
         create=True,
     )
 
+    if hc_manage_key is None:
+        if description is not None:
+            logger.warning(
+                "`description` is ignored when `hc_manage_key` is not provided."
+            )
+            description = None
+        if hc_timeout is not None:
+            logger.warning(
+                "`hc_timeout` is ignored when `hc_manage_key` is not provided."
+            )
+            hc_timeout = None
+        if hc_grace is not None:
+            logger.warning(
+                "`hc_grace` is ignored when `hc_manage_key` is not provided."
+            )
+            hc_grace = None
+
     check = hc.check(
         run_id=uuid4(),
         slug=slug,
         desc=description,
-        timeout=int(hc_timeout.total_seconds()),
-        grace=int(hc_grace.total_seconds()),
+        timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
+        grace=int(hc_grace.total_seconds()) if hc_grace else None,
         suppress_on_exit=False,
     )
 
