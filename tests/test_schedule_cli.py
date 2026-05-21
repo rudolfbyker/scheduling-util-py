@@ -199,7 +199,7 @@ echo "World"
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._send_errors_to_slack ERROR: "
-                    "[Errno 2] No such file or directory: 'this-program-does-not-exist'",
+                    "FileNotFoundError: [Errno 2] No such file or directory: 'this-program-does-not-exist'",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -231,7 +231,7 @@ echo "World"
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._send_errors_to_slack ERROR: "
-                    "Command '('false',)' returned non-zero exit status 1.",
+                    "CalledProcessError: Command '('false',)' returned non-zero exit status 1.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],

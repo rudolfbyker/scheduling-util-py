@@ -181,7 +181,7 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
                 + any_uuid
                 + " 200",
                 "[test] Failed: boom",
-                "boom",
+                "RuntimeError: boom",
                 "Sleeping for 0:00:00.001000 …",
                 "[test] Checking if it should run …",
                 "[test] Started.",

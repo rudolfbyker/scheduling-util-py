@@ -39,7 +39,7 @@ def send_errors_to_slack(
         yield
     except Exception as e:
         if log_error:
-            logger.error(e)
+            logger.error(f"{type(e).__name__}: {e}")
 
         if slack_webhook is not None:
             if limiter.ping_if_ready():
@@ -51,7 +51,7 @@ def send_errors_to_slack(
                         timeout=30,
                     )
                 except Exception as e:
-                    logger.error(e)
+                    logger.error(f"{type(e).__name__}: {e}")
             else:
                 logger.warning(
                     "Not posting to Slack to avoid hitting rate limits. "
