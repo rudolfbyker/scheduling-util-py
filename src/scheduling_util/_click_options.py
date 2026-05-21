@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from logging import getLevelName, WARNING, DEBUG, INFO, ERROR, CRITICAL
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from click_pendulum import Duration
 click_option__log_level = click.option(
     "--log-level",
     default=getLevelName(WARNING),
+    show_default=True,
     type=click.Choice(
         [
             getLevelName(DEBUG),
@@ -19,22 +21,33 @@ click_option__log_level = click.option(
         ],
         case_sensitive=False,
     ),
-    show_default=True,
     help="The level of logging for the `stderr` output. DEBUG is the most verbose, and CRITICAL is the least verbose.",
 )
 
+
+def get_default_cache_dir() -> Path:
+    """
+    Get the default cache directory.
+    """
+    if sys.platform == "win32":
+        return Path.home() / "AppData" / "Local" / "scheduling_util" / "cache"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Caches" / "scheduling_util"
+    else:
+        return Path.home() / ".cache" / "scheduling_util"
+
+
 click_option__cache_dir = click.option(
     "--cache-dir",
-    required=True,
+    default=get_default_cache_dir().resolve().as_posix(),
+    show_default=True,
     type=click.Path(
-        exists=True,
         file_okay=False,
-        dir_okay=True,
         writable=True,
         resolve_path=True,
         path_type=Path,
     ),
-    help="Directory for cache files (e.g., cloned git repos) persistent between backup runs.",
+    help="Directory for cache files.",
 )
 
 click_option__hc_ping_key = click.option(
