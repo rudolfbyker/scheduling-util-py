@@ -28,6 +28,7 @@ def schedule(
     slug: str,
     description: str | None,
     last_run_dir: Path,
+    last_run_reset: bool,
     success_period: timedelta,
     failure_period: timedelta,
     max_failures: int,
@@ -50,6 +51,7 @@ def schedule(
         slug: A short name describing the task. Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
         description: A description for the health check. Used for `healthchecks.io` and in Slack messages.
         last_run_dir: The directory in which to store the `LastRun` state files.
+        last_run_reset: Whether to ignore the existing `LastRun` state files on the disk and start anew.
         success_period: The minimum time to wait after a successful run before allowing the next run.
         failure_period: The minimum time to wait after a failed run before allowing the next run.
         max_failures: The maximum number of consecutive failures before taking action based on `on_max_failures`.
@@ -83,7 +85,10 @@ def schedule(
     )
 
     last_run_dir.mkdir(parents=True, exist_ok=True)
-    last_run = LastRun(path=last_run_dir / f"{slug}.json")
+    last_run_path = last_run_dir / f"{slug}.json"
+    if last_run_reset:
+        last_run_path.unlink(missing_ok=True)
+    last_run = LastRun(path=last_run_path)
 
     def hc_func() -> None:
         with check:

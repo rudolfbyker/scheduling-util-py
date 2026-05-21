@@ -130,6 +130,14 @@ logger = getLogger(__name__)
     help="If `--slack-webhook` is provided, this option specifies the minimum amount of time to wait "
     "between posting messages to Slack to avoid hitting rate limits.",
 )
+@click.option(
+    "--reset",
+    is_flag=True,
+    default=False,
+    help="Delete the state of the last run from the disk before starting, "
+    "so that the first run will always happen immediately. "
+    "Useful for testing.",
+)
 def schedule_cli(
     *,
     log_level: str,
@@ -151,6 +159,7 @@ def schedule_cli(
     py_exec: str | None,
     slack_webhook: str | None,
     slack_rate_limit: Duration,
+    reset: bool,
 ) -> None:
     """
     This script runs as a daemon, executing a command or Python code at a regular interval,
@@ -190,6 +199,7 @@ def schedule_cli(
         slug=slug,
         description=description,
         last_run_dir=cache_dir / "last_run",
+        last_run_reset=reset,
         success_period=success_period,
         failure_period=failure_period,
         max_failures=max_failures,
