@@ -6,7 +6,7 @@ from typing import Generator, Any
 
 from requests import post
 
-from .rate_limiter import RateLimiter
+from ._rate_limiter import RateLimiter
 
 logger = getLogger(__name__)
 

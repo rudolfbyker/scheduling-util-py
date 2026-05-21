@@ -9,9 +9,9 @@ from uuid import uuid4
 
 from hcio_client import HealthChecks
 
-from .last_run import create_run_predicate, LastRun
-from .rate_limiter import RateLimiter
-from .send_errors_to_slack import send_errors_to_slack
+from ._last_run import create_run_predicate, LastRun
+from ._rate_limiter import RateLimiter
+from ._send_errors_to_slack import send_errors_to_slack
 
 logger = getLogger(__name__)
 
