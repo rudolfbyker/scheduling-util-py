@@ -8,7 +8,7 @@ description="Python utilities for scheduling tasks in long-running processes, su
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
-    "hcio_client @ git+https://github.com/rudolfbyker/healthchecks-io-python-client.git@0.0.6",
+    "hcio_client @ https://github.com/rudolfbyker/healthchecks-io-python-client/releases/download/0.0.6/hcio_client-0.0.6-py3-none-any.whl",
 ]
 authors = [
     {name = "Rudolf Byker", email = "rudolfbyker@gmail.com"},
