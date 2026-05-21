@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scheduling_util"
+description="Python utilities for scheduling tasks in long-running processes, such as backups and health checks. "
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+]
+authors = [
+    {name = "Rudolf Byker", email = "rudolfbyker@gmail.com"},
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: MIT",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.11"
+
+[project.urls]
+repository = "https://github.com/rudolfbyker/scheduling-util-py"
+
+[tool.setuptools_scm]
+write_to = "src/scheduling_util/version.py"
