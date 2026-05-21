@@ -61,7 +61,8 @@ logger = getLogger(__name__)
 @click_option__cache_dir
 @click.option(
     "--success-period",
-    required=True,
+    default="1d",
+    show_default=True,
     type=ClickDuration(),
     help=(
         "The minimum time to wait after a successful run. "
@@ -71,7 +72,8 @@ logger = getLogger(__name__)
 )
 @click.option(
     "--failure-period",
-    required=True,
+    default="1d",
+    show_default=True,
     type=ClickDuration(),
     help=(
         "The minimum time to wait after a failed run. "
