@@ -7,20 +7,22 @@ from pathlib import Path
 import click
 from click_pendulum import Duration
 
+click_type__log_level = click.Choice(
+    [
+        getLevelName(DEBUG),
+        getLevelName(INFO),
+        getLevelName(WARNING),
+        getLevelName(ERROR),
+        getLevelName(CRITICAL),
+    ],
+    case_sensitive=False,
+)
+
 click_option__log_level = click.option(
     "--log-level",
     default=getLevelName(WARNING),
     show_default=True,
-    type=click.Choice(
-        [
-            getLevelName(DEBUG),
-            getLevelName(INFO),
-            getLevelName(WARNING),
-            getLevelName(ERROR),
-            getLevelName(CRITICAL),
-        ],
-        case_sensitive=False,
-    ),
+    type=click_type__log_level,
     help="The level of logging for the `stderr` output. DEBUG is the most verbose, and CRITICAL is the least verbose.",
 )
 
