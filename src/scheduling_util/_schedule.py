@@ -18,8 +18,8 @@ logger = getLogger(__name__)
 
 def schedule(
     *,
-    hc_ping_key: str,
-    hc_manage_key: str,
+    hc_ping_key: str | None,
+    hc_manage_key: str | None,
     hc_timeout: timedelta,
     hc_grace: timedelta,
     interval: timedelta,

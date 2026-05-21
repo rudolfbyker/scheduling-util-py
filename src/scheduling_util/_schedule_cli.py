@@ -131,8 +131,8 @@ logger = getLogger(__name__)
 def schedule_cli(
     *,
     log_level: str,
-    hc_ping_key: str,
-    hc_manage_key: str,
+    hc_ping_key: str | None,
+    hc_manage_key: str | None,
     hc_timeout: Duration,
     hc_grace: Duration,
     interval: Duration,

@@ -52,13 +52,13 @@ click_option__cache_dir = click.option(
 
 click_option__hc_ping_key = click.option(
     "--hc-ping-key",
-    required=True,
+    required=False,
     help="The `healthchecks.io` ping key.",
 )
 
 click_option__hc_manage_key = click.option(
     "--hc-manage-key",
-    required=True,
+    required=False,
     help="The `healthchecks.io` manage key.",
 )
 
