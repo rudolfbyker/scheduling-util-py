@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import shlex
 from importlib import import_module
 from logging import getLogger, INFO, getLevelName, getLevelNamesMapping
 from pathlib import Path
+from subprocess import list2cmdline
 from typing import Literal, Callable, Tuple, Any
 
 import click
@@ -162,7 +165,7 @@ def click_invoke(
     *,
     command_str: str,
     auto_envvar_prefix: str | None,
-    args: Tuple[str],
+    args: Tuple[str, ...],
 ) -> Callable[[], None]:
     """
     Schedule another Click command.
@@ -257,7 +260,7 @@ def subprocess(
     shell: bool,
     check: bool,
     log_level: str,
-    args: Tuple[str],
+    args: Tuple[str, ...],
 ) -> Callable[[], None]:
     """
     Schedule a shell command.
@@ -268,7 +271,7 @@ def subprocess(
 
     def func() -> None:
         run_with_logger(
-            args=args,
+            args=args_for_subprocess_run(shell=shell, args=args),
             shell=shell,
             logger=logger.getChild("subprocess"),
             level=getLevelNamesMapping().get(log_level, INFO),
@@ -276,6 +279,21 @@ def subprocess(
         )
 
     return func
+
+
+def args_for_subprocess_run(
+    *, shell: bool, args: Tuple[str, ...]
+) -> str | Tuple[str, ...]:
+    if not shell:
+        return args
+
+    if len(args) == 1:
+        return args[0]
+
+    if os.name == "nt":
+        return list2cmdline(args)
+
+    return shlex.join(args)
 
 
 @schedule_cli.result_callback()
