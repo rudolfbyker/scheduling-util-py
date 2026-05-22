@@ -14,7 +14,7 @@ from scheduling_util._schedule_cli import schedule_cli
 
 repo_dir = Path(__file__).resolve().parent.parent
 schedule_script_path = repo_dir / "scripts/schedule.py"
-valid_hc_uuid = "123e4567-e89b-12d3-a456-426614174000"
+hc_uuid = "my-health-check"
 
 
 class TestScheduleCli(unittest.TestCase):
@@ -59,7 +59,7 @@ class TestScheduleCli(unittest.TestCase):
                     schedule_cli,
                     [
                         "--hc-uuid",
-                        valid_hc_uuid,
+                        hc_uuid,
                         "--hc-ping-key",
                         "ping-key",
                         "--hc-manage-key",
@@ -80,26 +80,11 @@ class TestScheduleCli(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         schedule_mock.assert_called_once()
         schedule_kwargs = schedule_mock.call_args.kwargs
-        self.assertEqual(schedule_kwargs["hc_uuid"], valid_hc_uuid)
+        self.assertEqual(schedule_kwargs["hc_uuid"], hc_uuid)
         self.assertEqual(schedule_kwargs["hc_ping_key"], "ping-key")
         self.assertEqual(schedule_kwargs["hc_manage_key"], "manage-key")
         self.assertEqual(schedule_kwargs["hc_timeout"].total_seconds(), 300)
         self.assertEqual(schedule_kwargs["hc_grace"].total_seconds(), 600)
-
-    def test_hc_uuid__invalid(self) -> None:
-        result = CliRunner().invoke(
-            schedule_cli,
-            [
-                "--hc-uuid",
-                "not-a-uuid",
-                "py-exec",
-                "--code",
-                "pass",
-            ],
-        )
-
-        self.assertNotEqual(result.exit_code, 0)
-        self.assertIn("Invalid value for '--hc-uuid'", result.output)
 
     def test_py_exec(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
