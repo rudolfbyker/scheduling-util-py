@@ -4,11 +4,17 @@ import unittest
 from pathlib import Path
 from subprocess import run
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from click.testing import CliRunner
 
 from .subprocess_util import assert_process_result
 
+from scheduling_util._schedule_cli import schedule_cli
+
 repo_dir = Path(__file__).resolve().parent.parent
 schedule_script_path = repo_dir / "scripts/schedule.py"
+hc_uuid = "my-health-check"
 
 
 class TestScheduleCli(unittest.TestCase):
@@ -33,6 +39,52 @@ class TestScheduleCli(unittest.TestCase):
             stdout_allow_extra=True,
             stdout_order_matters=False,
         )
+
+    def test_help__healthchecks_options(self) -> None:
+        result = CliRunner().invoke(schedule_cli, ["--help"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("--hc-ping-key", result.output)
+        self.assertIn("--hc-manage-key", result.output)
+        self.assertIn("--hc-timeout", result.output)
+        self.assertIn("--hc-grace", result.output)
+        self.assertIn("--hc-uuid", result.output)
+        self.assertIn("The UUID of the health check.", result.output)
+        self.assertIn("healthchecks.io", result.output)
+
+    def test_hc_uuid__forwarded_to_schedule(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            with patch("scheduling_util._schedule_cli.schedule") as schedule_mock:
+                result = CliRunner().invoke(
+                    schedule_cli,
+                    [
+                        "--hc-uuid",
+                        hc_uuid,
+                        "--hc-ping-key",
+                        "ping-key",
+                        "--hc-manage-key",
+                        "manage-key",
+                        "--hc-timeout",
+                        "5m",
+                        "--hc-grace",
+                        "10m",
+                        "--max-runs=1",
+                        "--cache-dir",
+                        tmp_dir_str,
+                        "py-exec",
+                        "--code",
+                        "pass",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        schedule_mock.assert_called_once()
+        schedule_kwargs = schedule_mock.call_args.kwargs
+        self.assertEqual(schedule_kwargs["hc_uuid"], hc_uuid)
+        self.assertEqual(schedule_kwargs["hc_ping_key"], "ping-key")
+        self.assertEqual(schedule_kwargs["hc_manage_key"], "manage-key")
+        self.assertEqual(schedule_kwargs["hc_timeout"].total_seconds(), 300)
+        self.assertEqual(schedule_kwargs["hc_grace"].total_seconds(), 600)
 
     def test_py_exec(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:

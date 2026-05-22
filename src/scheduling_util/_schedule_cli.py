@@ -17,6 +17,7 @@ from ._click_options import (
     click_option__log_level,
     click_option__hc_grace,
     click_option__hc_timeout,
+    click_option__hc_uuid,
     click_option__heartbeat_file,
     click_type__log_level,
 )
@@ -31,6 +32,7 @@ logger = getLogger(__name__)
 @click_option__log_level
 @click_option__hc_ping_key
 @click_option__hc_manage_key
+@click_option__hc_uuid
 @click_option__hc_timeout
 @click_option__hc_grace
 @click.option(
@@ -282,6 +284,7 @@ def schedule_cli__on_result(
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
+    hc_uuid: str | None,
     hc_timeout: Duration | None,
     hc_grace: Duration | None,
     interval: Duration,
@@ -302,6 +305,7 @@ def schedule_cli__on_result(
     schedule(
         hc_ping_key=hc_ping_key,
         hc_manage_key=hc_manage_key,
+        hc_uuid=hc_uuid,
         hc_timeout=hc_timeout,
         hc_grace=hc_grace,
         interval=interval,
