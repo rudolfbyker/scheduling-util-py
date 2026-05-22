@@ -50,7 +50,7 @@ logger = getLogger(__name__)
 @click_option__heartbeat_file
 @click.option(
     "--name",
-    required=True,
+    required=False,
     help="A short name describing the task. "
     "Used as the slug for `healthchecks.io` and as the file name of the LastRun state.",
 )
@@ -287,7 +287,7 @@ def schedule_cli__on_result(
     interval: Duration,
     max_runs: int | None,
     heartbeat_file: Path | None,
-    name: str,
+    name: str | None,
     description: str | None,
     cache_dir: Path,
     success_period: Duration,

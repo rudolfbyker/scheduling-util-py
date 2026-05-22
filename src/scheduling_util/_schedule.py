@@ -27,7 +27,7 @@ def schedule(
     interval: timedelta,
     max_runs: int | None = None,
     heartbeat_file: Path | None = None,
-    name: str,
+    name: str | None = None,
     description: str | None = None,
     last_run_dir: Path,
     last_run_reset: bool = False,
@@ -43,7 +43,9 @@ def schedule(
     Schedule a function to run at a regular interval, with health checks and error reporting.
 
     Args:
-        hc_ping_key: The ping key for `healthchecks.io`.
+        hc_ping_key:
+            The ping key for `healthchecks.io`.
+            To ping a health check, we need (the UUID) || (the slug && the ping key).
         hc_manage_key: The manage key for `healthchecks.io`.
         hc_timeout:
             The timeout for the health check.
@@ -53,13 +55,14 @@ def schedule(
             If a run fails, it will be given this much time to succeed before the next run is allowed to start.
         hc_uuid:
             The UUID of the health check.
-            This can be used to send pings when we don't have a ping key.
+            To ping a health check, we need (the UUID) || (the slug && the ping key).
         interval: The amount of time to wait between runs.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
         heartbeat_file: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
         name:
             A short name describing the task.
             Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
+            To ping a health check, we need (the UUID) || (the slug && the ping key).
         description: A description for the health check. Used for `healthchecks.io` and in Slack messages.
         last_run_dir: The directory in which to store the `LastRun` state files.
         last_run_reset: Whether to ignore the existing `LastRun` state files on the disk and start anew.
@@ -105,7 +108,7 @@ def schedule(
             grace=int(hc_grace.total_seconds()) if hc_grace else None,
             suppress_on_exit=False,
         )
-        # To send health check pings, we need the UUID of the check, or a ping key and the slug.
+        # To ping a health check, we need (the UUID) || (the slug && the ping key).
         if (hc_uuid or (hc_ping_key and name))
         else None
     )
@@ -119,7 +122,7 @@ def schedule(
     )
 
     last_run_dir.mkdir(parents=True, exist_ok=True)
-    last_run_path = last_run_dir / f"{name}.json"
+    last_run_path = last_run_dir / f"{name or uuid4()}.json"
     if last_run_reset:
         last_run_path.unlink(missing_ok=True)
     last_run = LastRun(path=last_run_path)
