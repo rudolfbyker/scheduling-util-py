@@ -1,11 +1,14 @@
 import os
+import re
+import shlex
 import sys
 import unittest
 from pathlib import Path
-from subprocess import run
+from subprocess import list2cmdline, run
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from comparable_pattern import ComparablePattern
 from click.testing import CliRunner
 
 from .subprocess_util import assert_process_result
@@ -15,6 +18,27 @@ from scheduling_util._schedule_cli import schedule_cli
 repo_dir = Path(__file__).resolve().parent.parent
 schedule_script_path = repo_dir / "scripts/schedule.py"
 hc_uuid = "my-health-check"
+
+
+def schedule_script_env() -> dict[str, str]:
+    python_path = os.pathsep.join(
+        [
+            (repo_dir / "src").as_posix(),
+            repo_dir.as_posix(),
+        ]
+    )
+    return {
+        **os.environ,
+        "PYTHONPATH": python_path,
+        "PYTHONIOENCODING": "utf-8",
+    }
+
+
+def shell_command(args: list[str]) -> str:
+    if os.name == "nt":
+        return list2cmdline(args)
+
+    return shlex.join(args)
 
 
 class TestScheduleCli(unittest.TestCase):
@@ -27,7 +51,7 @@ class TestScheduleCli(unittest.TestCase):
                 "--help",
             ],
             capture_output=True,
-            env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+            env=schedule_script_env(),
         )
 
         assert_process_result(
@@ -108,7 +132,7 @@ logger.info("hello from py-exec")
 """,
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -141,7 +165,7 @@ logger.info("hello from py-exec")
                     "Bertus",
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -169,11 +193,12 @@ logger.info("hello from py-exec")
                     "--cache-dir",
                     str(tmp_dir),
                     "subprocess",
-                    "echo",
-                    "Hello world",
+                    sys.executable,
+                    "-c",
+                    "print('Hello world')",
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -190,6 +215,9 @@ logger.info("hello from py-exec")
     def test_subprocess__shell(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
+            command = shell_command(
+                [sys.executable, "-c", "print('Hello'); print('World')"]
+            )
 
             completed = run(
                 args=[
@@ -202,13 +230,10 @@ logger.info("hello from py-exec")
                     str(tmp_dir),
                     "subprocess",
                     "--shell",
-                    """\
-echo "Hello"
-echo "World"
-""",
+                    command,
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -242,7 +267,7 @@ echo "World"
                     "args",
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -250,8 +275,12 @@ echo "World"
                 actual_completed_process=completed,
                 expected_code=0,
                 expected_stderr=[
-                    "scheduling_util._send_errors_to_slack ERROR: "
-                    "FileNotFoundError: [Errno 2] No such file or directory: 'this-program-does-not-exist'",
+                    ComparablePattern(
+                        re.compile(
+                            r"scheduling_util\._send_errors_to_slack ERROR: "
+                            r"FileNotFoundError: .*"
+                        )
+                    ),
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -260,6 +289,7 @@ echo "World"
     def test_subprocess__check(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
+            command = [sys.executable, "-c", "raise SystemExit(1)"]
 
             completed = run(
                 args=[
@@ -271,10 +301,10 @@ echo "World"
                     "--cache-dir",
                     str(tmp_dir),
                     "subprocess",
-                    "false",
+                    *command,
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -283,7 +313,7 @@ echo "World"
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._send_errors_to_slack ERROR: "
-                    "CalledProcessError: Command '('false',)' returned non-zero exit status 1.",
+                    f"CalledProcessError: Command '{tuple(command)}' returned non-zero exit status 1.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -292,6 +322,7 @@ echo "World"
     def test_subprocess__no_check(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)
+            command = [sys.executable, "-c", "raise SystemExit(1)"]
 
             completed = run(
                 args=[
@@ -304,10 +335,10 @@ echo "World"
                     str(tmp_dir),
                     "subprocess",
                     "--no-check",
-                    "false",
+                    *command,
                 ],
                 capture_output=True,
-                env={**os.environ, "PYTHONPATH": repo_dir.as_posix()},
+                env=schedule_script_env(),
             )
 
             assert_process_result(
@@ -317,7 +348,12 @@ echo "World"
                 expected_stderr=[
                     "scheduling_util._last_run DEBUG: [test] Checking if it should run …",
                     "scheduling_util._last_run DEBUG: [test] Started.",
-                    'scheduling_util._schedule_cli.subprocess DEBUG: Starting process: ["false"]',
+                    ComparablePattern(
+                        re.compile(
+                            r"scheduling_util\._schedule_cli\.subprocess DEBUG: "
+                            r'Starting process: \[.*"raise SystemExit\(1\)".*\]'
+                        )
+                    ),
                     "scheduling_util._last_run DEBUG: [test] Succeeded.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
