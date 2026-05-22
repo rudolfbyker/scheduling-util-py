@@ -4,6 +4,7 @@ from importlib import import_module
 from logging import getLogger, INFO, getLevelName, getLevelNamesMapping
 from pathlib import Path
 from typing import Literal, Callable, Tuple, Any
+from uuid import UUID
 
 import click
 from click_pendulum import Duration as ClickDuration
@@ -17,6 +18,7 @@ from ._click_options import (
     click_option__log_level,
     click_option__hc_grace,
     click_option__hc_timeout,
+    click_option__hc_uuid,
     click_option__heartbeat_file,
     click_type__log_level,
 )
@@ -31,6 +33,7 @@ logger = getLogger(__name__)
 @click_option__log_level
 @click_option__hc_ping_key
 @click_option__hc_manage_key
+@click_option__hc_uuid
 @click_option__hc_timeout
 @click_option__hc_grace
 @click.option(
@@ -282,6 +285,7 @@ def schedule_cli__on_result(
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
+    hc_uuid: UUID | None,
     hc_timeout: Duration | None,
     hc_grace: Duration | None,
     interval: Duration,
@@ -302,6 +306,7 @@ def schedule_cli__on_result(
     schedule(
         hc_ping_key=hc_ping_key,
         hc_manage_key=hc_manage_key,
+        hc_uuid=str(hc_uuid) if hc_uuid is not None else None,
         hc_timeout=hc_timeout,
         hc_grace=hc_grace,
         interval=interval,

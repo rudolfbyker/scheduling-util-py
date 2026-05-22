@@ -85,7 +85,7 @@ click_option__hc_grace = click.option(
 click_option__hc_uuid = click.option(
     "--hc-uuid",
     required=False,
-    type=Duration(),
+    type=click.UUID,
     help=f"The UUID of the health check. {what_is_needed_to_ping}",
 )
 
