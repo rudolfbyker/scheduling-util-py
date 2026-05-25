@@ -179,22 +179,3 @@ class JsonLogEncoder(json.JSONEncoder):
                 return repr(o)
             except BaseException as e:
                 return f"Failed to serialize object: {e}"
-
-
-class ProcessIdSpyHandler(Handler):
-    """
-    A logging handler that looks for lines of the form `PID=12345` in log messages, and stores the PID in the `pid` attribute.
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.pid: int | None = None
-
-    def emit(self, record: LogRecord) -> None:
-        msg = self.format(record)
-        prefix = "PID="
-        if msg.startswith(prefix):
-            try:
-                self.pid = int(msg[len(prefix) :])
-            except ValueError:
-                pass
