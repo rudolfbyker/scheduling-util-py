@@ -36,7 +36,7 @@ class TestScheduleFunction(unittest.TestCase):
             requests_mock.Mocker() as m,
         ):
             tmp_dir = Path(tmp_dir_str)
-            heartbeat_file = tmp_dir / "heartbeat.txt"
+            heartbeat_path = tmp_dir / "heartbeat.txt"
 
             m.register_uri(
                 method=requests_mock.ANY,
@@ -52,7 +52,7 @@ class TestScheduleFunction(unittest.TestCase):
                 hc_grace=timedelta(days=2),
                 interval=timedelta(milliseconds=1),
                 max_runs=3,
-                heartbeat_file=heartbeat_file,
+                heartbeat_path=heartbeat_path,
                 name="test",
                 description="Test schedule",
                 last_run_dir=tmp_dir / "last-run",
@@ -129,7 +129,7 @@ class TestScheduleFunction(unittest.TestCase):
                 hc_grace=timedelta(days=2),
                 interval=timedelta(milliseconds=1),
                 max_runs=2,
-                heartbeat_file=None,
+                heartbeat_path=None,
                 name="test",
                 description="Test schedule",
                 last_run_dir=last_run_dir,
@@ -172,7 +172,8 @@ Exception type: RuntimeError
 Exception details:
   boom
 
-Traceback:""" + ComparablePattern(re.compile(r".*")),
+Traceback:"""
+                + ComparablePattern(re.compile(r".*")),
                 "POST https://hc-ping.com/ping-key/test/log?create=1&rid="
                 + any_uuid
                 + " 200",
@@ -232,7 +233,7 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
                 hc_grace=timedelta(days=2),
                 interval=timedelta(milliseconds=1),
                 max_runs=2,
-                heartbeat_file=None,
+                heartbeat_path=None,
                 name="test",
                 description="Test schedule",
                 last_run_dir=last_run_dir,
@@ -296,7 +297,7 @@ boom""",
                 hc_grace=timedelta(days=2),
                 interval=timedelta(milliseconds=1),
                 max_runs=3,
-                heartbeat_file=None,
+                heartbeat_path=None,
                 name="test",
                 description="Test schedule",
                 last_run_dir=last_run_dir,

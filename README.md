@@ -55,7 +55,7 @@ schedule \
   --success-period 1d \
   --failure-period 10m \
   --cache-dir ./.cache/scheduling-util \
-  --heartbeat-file ./state/backup-heartbeat \
+  --heartbeat-path ./state/backup-heartbeat \
   subprocess rsync -a ./source/ ./backup/
 ```
 

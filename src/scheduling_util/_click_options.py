@@ -89,8 +89,8 @@ click_option__hc_uuid = click.option(
     help=f"The UUID of the health check. {what_is_needed_to_ping}",
 )
 
-click_option__heartbeat_file = click.option(
-    "--heartbeat-file",
+click_option__heartbeat_path = click.option(
+    "--heartbeat-path",
     type=click.Path(
         dir_okay=False,
         writable=True,

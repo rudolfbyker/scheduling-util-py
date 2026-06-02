@@ -21,7 +21,7 @@ from ._click_options import (
     click_option__hc_grace,
     click_option__hc_timeout,
     click_option__hc_uuid,
-    click_option__heartbeat_file,
+    click_option__heartbeat_path,
     click_type__log_level,
 )
 from ._logging_util import stream_logs_to_stderr
@@ -52,7 +52,7 @@ logger = getLogger(__name__)
     help="The maximum number of iterations of this script before exiting. "
     "If not set, this script will run indefinitely.",
 )
-@click_option__heartbeat_file
+@click_option__heartbeat_path
 @click.option(
     "--name",
     required=False,
@@ -307,7 +307,7 @@ def schedule_cli__on_result(
     hc_grace: Duration | None,
     interval: Duration,
     max_runs: int | None,
-    heartbeat_file: Path | None,
+    heartbeat_path: Path | None,
     name: str | None,
     description: str | None,
     cache_dir: Path,
@@ -328,7 +328,7 @@ def schedule_cli__on_result(
         hc_grace=hc_grace,
         interval=interval,
         max_runs=max_runs,
-        heartbeat_file=heartbeat_file,
+        heartbeat_path=heartbeat_path,
         name=name,
         description=description,
         last_run_dir=cache_dir / "last_run",

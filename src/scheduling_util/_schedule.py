@@ -26,7 +26,7 @@ def schedule(
     hc_uuid: str | None = None,
     interval: timedelta,
     max_runs: int | None = None,
-    heartbeat_file: Path | None = None,
+    heartbeat_path: Path | None = None,
     name: str | None = None,
     description: str | None = None,
     last_run_dir: Path,
@@ -58,7 +58,7 @@ def schedule(
             To ping a health check, we need (the UUID) || (the slug && the ping key).
         interval: The amount of time to wait between runs.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
-        heartbeat_file: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
+        heartbeat_path: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
         name:
             A short name describing the task.
             Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
@@ -134,10 +134,10 @@ def schedule(
     wrapped_function = last_run.wrap(f=hc_func, should_run=predicate)
 
     def attempt() -> None:
-        if heartbeat_file is not None:
+        if heartbeat_path is not None:
             logger.debug("Updating heartbeat …")
-            heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
-            heartbeat_file.touch()
+            heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+            heartbeat_path.touch()
 
         with send_errors_to_slack(
             slack_webhook=slack_webhook,
