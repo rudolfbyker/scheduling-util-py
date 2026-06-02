@@ -172,8 +172,7 @@ Exception type: RuntimeError
 Exception details:
   boom
 
-Traceback:"""
-                + ComparablePattern(re.compile(r".*")),
+Traceback:""" + ComparablePattern(re.compile(r".*")),
                 "POST https://hc-ping.com/ping-key/test/log?create=1&rid="
                 + any_uuid
                 + " 200",
