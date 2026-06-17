@@ -106,7 +106,6 @@ def schedule(
             desc=description,
             timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
             grace=int(hc_grace.total_seconds()) if hc_grace else None,
-            suppress_on_exit=False,
         )
         # To ping a health check, we need (the UUID) || (the slug && the ping key).
         if (hc_uuid or (hc_ping_key and name))
