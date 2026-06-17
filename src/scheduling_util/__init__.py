@@ -6,7 +6,11 @@ from ._logging_util import (
     stream_logs_to_jsonl_file,
     stream_logs_to_stderr,
 )
-from ._rate_limiter import RateLimiter, RollingWindowRateLimiter
+from ._rate_limiter import (
+    RateLimiter,
+    RateLimiterProtocol,
+    RollingWindowRateLimiter,
+)
 from ._schedule import schedule, repeat
 from ._schedule_cli import schedule_cli
 from ._send_errors_to_slack import send_errors_to_slack, error_to_slack
@@ -20,6 +24,7 @@ __all__ = [
     "LastRunState",
     "LogRedactor",
     "RateLimiter",
+    "RateLimiterProtocol",
     "RollingWindowRateLimiter",
     "repeat",
     "schedule",

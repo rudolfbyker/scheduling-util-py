@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Protocol
 
 
 @contextmanager
@@ -44,6 +44,30 @@ def _exclusive_path_lock(path: Path) -> Iterator[None]:
             yield
         finally:
             fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_UN)
+
+
+class RateLimiterProtocol(Protocol):
+    """
+    Shared interface for rate limiter implementations.
+    """
+
+    def ping(self) -> None:
+        """
+        Record that an action was taken.
+        """
+        ...
+
+    def ping_if_ready(self) -> bool:
+        """
+        Record a ping and return True if the action is allowed.
+        """
+        ...
+
+    def is_ready(self) -> bool:
+        """
+        Return True if the action is currently allowed.
+        """
+        ...
 
 
 @dataclass
