@@ -49,8 +49,8 @@ class RateLimiter:
         """
         Record a ping and return True if enough time has passed.
 
-        When `path` is set, the check-and-ping sequence is protected by a
-        Linux file lock so concurrent processes sharing the same path do not
+        On POSIX systems, when `path` is set, the check-and-ping sequence is protected by an advisory file lock
+        so that concurrent cooperating processes sharing the same path do not
         all pass the readiness check before one of them persists the ping.
         """
         with self._exclusive_lock():
