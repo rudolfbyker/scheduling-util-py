@@ -14,12 +14,28 @@ from scheduling_util import RateLimiter, schedule, repeat
 from scheduling_util._last_run import read_state
 from .util import any_uuid
 
+health_check_uuid = "00000000-0000-0000-0000-000000000001"
+
 
 class TestScheduleFunction(unittest.TestCase):
     def _slack_rate_limiter(self, tmp_dir: Path) -> RateLimiter:
         return RateLimiter(
             minimum_period=timedelta(hours=1),
             path=tmp_dir / "rate_limiter" / "slack_errors",
+        )
+
+    def _mock_healthchecks(self, m: Any) -> None:
+        m.register_uri(
+            method=requests_mock.ANY,
+            url=requests_mock.ANY,
+            status_code=200,
+            text="OK",
+        )
+        m.register_uri(
+            method="POST",
+            url="https://healthchecks.io/api/v3/checks/",
+            status_code=200,
+            json={"uuid": health_check_uuid},
         )
 
     def test_success_on_first_try(self) -> None:
@@ -38,12 +54,7 @@ class TestScheduleFunction(unittest.TestCase):
             tmp_dir = Path(tmp_dir_str)
             heartbeat_path = tmp_dir / "heartbeat.txt"
 
-            m.register_uri(
-                method=requests_mock.ANY,
-                url=requests_mock.ANY,
-                status_code=200,
-                text="OK",
-            )
+            self._mock_healthchecks(m)
 
             schedule(
                 hc_ping_key="ping-key",
@@ -69,20 +80,18 @@ class TestScheduleFunction(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertEqual(
             [
-                "GET https://healthchecks.io/api/v3/checks?slug=test 200",
+                "POST https://healthchecks.io/api/v3/checks/ 200",
                 "Updating heartbeat …",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "Entering context for health check with slug=test",
-                "Sending start ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test/start?create=1&rid="
+                f"Entering context for health check with slug=test and uuid={health_check_uuid}",
+                f"Sending start ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}/start?rid="
                 + any_uuid
                 + " 200",
-                "Context for health check with slug=test exited without exception.",
-                "Sending success ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test?create=1&rid="
-                + any_uuid
-                + " 200",
+                f"Context for health check with slug=test and uuid={health_check_uuid} exited without exception.",
+                f"Sending success ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}?rid=" + any_uuid + " 200",
                 "[test] Succeeded.",
                 "Sleeping for 0:00:00.001000 …",
                 "Updating heartbeat …",
@@ -115,12 +124,7 @@ class TestScheduleFunction(unittest.TestCase):
             tmp_dir = Path(tmp_dir_str)
             last_run_dir = tmp_dir / "last-run"
 
-            m.register_uri(
-                method=requests_mock.ANY,
-                url=requests_mock.ANY,
-                status_code=200,
-                text="OK",
-            )
+            self._mock_healthchecks(m)
 
             schedule(
                 hc_ping_key="ping-key",
@@ -154,30 +158,30 @@ class TestScheduleFunction(unittest.TestCase):
 
         self.assertEqual(
             [
-                "GET https://healthchecks.io/api/v3/checks?slug=test 200",
+                "POST https://healthchecks.io/api/v3/checks/ 200",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "Entering context for health check with slug=test",
-                "Sending start ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test/start?create=1&rid="
+                f"Entering context for health check with slug=test and uuid={health_check_uuid}",
+                f"Sending start ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}/start?rid="
                 + any_uuid
                 + " 200",
                 """\
-Context for health check with slug=test exited with exception `RuntimeError`:
+Context for health check with slug=test and uuid=00000000-0000-0000-0000-000000000001 exited with exception `RuntimeError`:
 boom""",
                 f"""\
-Sending logs for health check with slug=test:
+Sending logs for health check with slug=test and uuid={health_check_uuid}:
 Exception type: RuntimeError
 
 Exception details:
   boom
 
 Traceback:""" + ComparablePattern(re.compile(r".*")),
-                "POST https://hc-ping.com/ping-key/test/log?create=1&rid="
+                f"POST https://hc-ping.com/{health_check_uuid}/log?rid="
                 + any_uuid
                 + " 200",
-                "Sending failure ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test/fail?create=1&rid="
+                f"Sending failure ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}/fail?rid="
                 + any_uuid
                 + " 200",
                 "[test] Failed: boom",
@@ -185,16 +189,14 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
                 "Sleeping for 0:00:00.001000 …",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "Entering context for health check with slug=test",
-                "Sending start ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test/start?create=1&rid="
+                f"Entering context for health check with slug=test and uuid={health_check_uuid}",
+                f"Sending start ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}/start?rid="
                 + any_uuid
                 + " 200",
-                "Context for health check with slug=test exited without exception.",
-                "Sending success ping for health check with slug=test.",
-                "GET https://hc-ping.com/ping-key/test?create=1&rid="
-                + any_uuid
-                + " 200",
+                f"Context for health check with slug=test and uuid={health_check_uuid} exited without exception.",
+                f"Sending success ping for health check with slug=test and uuid={health_check_uuid}.",
+                f"GET https://hc-ping.com/{health_check_uuid}?rid=" + any_uuid + " 200",
                 "[test] Succeeded.",
                 "Done.",
             ],
@@ -218,12 +220,7 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
             tmp_dir = Path(tmp_dir_str)
             last_run_dir = tmp_dir / "last-run"
 
-            m.register_uri(
-                method=requests_mock.ANY,
-                url=requests_mock.ANY,
-                status_code=200,
-                text="OK",
-            )
+            self._mock_healthchecks(m)
 
             schedule(
                 hc_ping_key="ping-key",
@@ -282,12 +279,7 @@ boom""",
             tmp_dir = Path(tmp_dir_str)
             last_run_dir = tmp_dir / "last-run"
 
-            m.register_uri(
-                method=requests_mock.ANY,
-                url=requests_mock.ANY,
-                status_code=200,
-                text="OK",
-            )
+            self._mock_healthchecks(m)
 
             schedule(
                 hc_ping_key="ping-key",
