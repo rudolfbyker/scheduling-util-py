@@ -33,6 +33,21 @@ False
 
 ```
 
+Use a rolling-window rate limiter to allow a burst of events:
+
+```python
+>>> from datetime import timedelta
+>>> from scheduling_util import RollingWindowRateLimiter
+>>> limiter = RollingWindowRateLimiter(max_events=2, window=timedelta(minutes=1))
+>>> limiter.ping_if_ready()
+True
+>>> limiter.ping_if_ready()
+True
+>>> limiter.ping_if_ready()
+False
+
+```
+
 Run Python code from the scheduler CLI:
 
 ```shell
