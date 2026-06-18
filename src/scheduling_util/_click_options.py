@@ -3,9 +3,12 @@ from __future__ import annotations
 import sys
 from logging import getLevelName, WARNING, DEBUG, INFO, ERROR, CRITICAL
 from pathlib import Path
+from typing import Any, Callable, TypeVar
 
 import click
+from click import Context, Parameter
 from click_pendulum import Duration
+from ordered_set import OrderedSet
 
 click_type__log_level = click.Choice(
     [
@@ -101,3 +104,72 @@ click_option__heartbeat_path = click.option(
     help="Path to a file that will be touched on the start of each poll iteration to act as a heartbeat. "
     "This allows health check scripts to know when this script stopped running or got stuck.",
 )
+
+T = TypeVar("T")
+
+
+def create_click_csv_callback(
+    *,
+    value_callback: Callable[[str], T] | None = None,
+) -> Callable[[Context, Parameter, Any], OrderedSet[T]]:
+    """
+    Create a callback for a click parameter that accepts one or more comma-separated lists of values.
+
+    Args:
+        value_callback:
+            A callback that converts a single string value to the desired type.
+            This is called after the input is split by commas.
+            This will not be called for empty strings or whitespace-only strings.
+            This will be called exactly once for each unique value.
+
+    Returns:
+        A callback that can be used as a click parameter callback.
+
+    Examples:
+        Our callback does not use the click Context or Parameter objects.
+        >>> ctx: Any = None
+        >>> param: Any = None
+
+        Without a value callback, the input is returned as-is, which is always strings.
+        >>> c_str = create_click_csv_callback()
+        >>> c_str(ctx, param, "")
+        OrderedSet()
+        >>> c_str(ctx, param, "a,b,c")
+        OrderedSet(['a', 'b', 'c'])
+        >>> c_str(ctx, param, ("a,b,c", "d,e,f"))
+        OrderedSet(['a', 'b', 'c', 'd', 'e', 'f'])
+
+        >>> c_int = create_click_csv_callback(value_callback=int)
+        >>> c_int(ctx, param, "")
+        OrderedSet()
+        >>> c_int(ctx, param, "1,2,3")
+        OrderedSet([1, 2, 3])
+        >>> c_int(ctx, param, ("1,2,3", "4,5,6"))
+        OrderedSet([1, 2, 3, 4, 5, 6])
+    """
+
+    def param_callback(
+        ctx: Context,
+        param: Parameter,
+        value: Any,
+    ) -> OrderedSet[T]:
+        if value is None:
+            return OrderedSet()
+
+        if isinstance(value, tuple):
+            # This happens when `param.multiple` is `True`.
+            value = ",".join(value)
+
+        if not isinstance(value, str):
+            raise TypeError("Expected a string")
+
+        unique_strings = OrderedSet(item.strip() for item in value.split(","))
+        if "" in unique_strings:
+            unique_strings.remove("")
+
+        if value_callback:
+            return OrderedSet(value_callback(item) for item in unique_strings)
+        else:
+            return unique_strings  # type: ignore[return-value]
+
+    return param_callback
