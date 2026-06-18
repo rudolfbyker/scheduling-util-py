@@ -26,6 +26,7 @@
           <option value="decimal.Decimal" />
           <option value="fractions.Fraction" />
           <option value="datetime.timedelta" />
+          <option value="inspect.Signature" />
         </list>
       </option>
     </inspection_tool>
