@@ -1,3 +1,4 @@
+import json
 import re
 import unittest
 from datetime import timedelta
@@ -11,7 +12,6 @@ import requests_mock
 from comparable_pattern import ComparablePattern
 
 from scheduling_util import RateLimiter, schedule, repeat
-from scheduling_util._last_run import read_state
 from .util import any_uuid
 
 health_check_uuid = "00000000-0000-0000-0000-000000000001"
@@ -69,6 +69,7 @@ class TestScheduleFunction(unittest.TestCase):
                 last_run_dir=tmp_dir / "last-run",
                 last_run_reset=False,
                 success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
                 failure_period=timedelta(hours=1),
                 max_failures=3,
                 on_max_failures="stall",
@@ -139,6 +140,7 @@ class TestScheduleFunction(unittest.TestCase):
                 last_run_dir=last_run_dir,
                 last_run_reset=False,
                 success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
                 failure_period=timedelta(milliseconds=0),
                 max_failures=3,
                 on_max_failures="stall",
@@ -147,7 +149,7 @@ class TestScheduleFunction(unittest.TestCase):
                 slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
             )
 
-            state = read_state(path=last_run_dir / "test.json")
+            state = json.loads((last_run_dir / "test.json").read_bytes())
 
         self.assertEqual(2, n)
         self.assertEqual(0, state["n_consecutive_failures"])
@@ -235,6 +237,7 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
                 last_run_dir=last_run_dir,
                 last_run_reset=False,
                 success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
                 failure_period=timedelta(milliseconds=0),
                 max_failures=1,
                 on_max_failures="stall",
@@ -243,7 +246,7 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
                 slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
             )
 
-            state = read_state(path=last_run_dir / "test.json")
+            state = json.loads((last_run_dir / "test.json").read_bytes())
 
         self.assertEqual(1, n)
         self.assertEqual(1, state["n_consecutive_failures"])
@@ -294,6 +297,7 @@ boom""",
                 last_run_dir=last_run_dir,
                 last_run_reset=False,
                 success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
                 failure_period=timedelta(hours=1),
                 max_failures=3,
                 on_max_failures="stall",
@@ -302,7 +306,7 @@ boom""",
                 slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
             )
 
-            state = read_state(path=last_run_dir / "test.json")
+            state = json.loads((last_run_dir / "test.json").read_bytes())
 
         self.assertEqual(1, n)
         self.assertEqual(1, state["n_consecutive_failures"])

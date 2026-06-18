@@ -32,9 +32,11 @@ def schedule(
     last_run_dir: Path,
     last_run_reset: bool = False,
     success_period: timedelta,
+    neutral_period: timedelta,
     failure_period: timedelta,
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
+    max_history_entries: int = 1000,
     func: Callable[[], None],
     slack_webhook: str | None = None,
     slack_rate_limiter: RateLimiter,
@@ -67,9 +69,13 @@ def schedule(
         last_run_dir: The directory in which to store the `LastRun` state files.
         last_run_reset: Whether to ignore the existing `LastRun` state files on the disk and start anew.
         success_period: The minimum time to wait after a successful run before allowing the next run.
+        neutral_period: The minimum time to wait after a neutral run before allowing the next run.
         failure_period: The minimum time to wait after a failed run before allowing the next run.
         max_failures: The maximum number of consecutive failures before taking action based on `on_max_failures`.
         on_max_failures: What to do if the job failed more than `max_failures` times.
+        max_history_entries:
+            The maximum number of history entries to keep.
+            A completed attempt normally adds two entries: one "started" entry and one "finished" entry.
         func: The function to run at each interval.
         slack_webhook: If provided, errors will be posted to this Slack webhook URL.
         slack_rate_limiter: Rate limiter for posting messages to Slack.
@@ -114,6 +120,7 @@ def schedule(
 
     predicate = create_run_predicate(
         success_period=success_period,
+        neutral_period=neutral_period,
         failure_period=failure_period,
         max_failures=max_failures,
         on_max_failures=on_max_failures,
@@ -124,7 +131,7 @@ def schedule(
     last_run_path = last_run_dir / f"{name or uuid4()}.json"
     if last_run_reset:
         last_run_path.unlink(missing_ok=True)
-    last_run = LastRun(path=last_run_path)
+    last_run = LastRun(path=last_run_path, max_history_entries=max_history_entries)
 
     def hc_func() -> None:
         with check or nullcontext():

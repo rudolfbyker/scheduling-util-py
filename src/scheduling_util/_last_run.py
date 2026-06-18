@@ -1,4 +1,4 @@
-import json
+import time
 from datetime import datetime, timedelta
 from functools import (
     WRAPPER_ASSIGNMENTS,
@@ -12,14 +12,20 @@ from typing import (
     ParamSpec,
     Callable,
     Any,
-    TypedDict,
     Protocol,
     Literal,
-    Dict,
     Optional,
+    Tuple,
 )
 
 from hcio_client import HealthCheck
+
+from scheduling_util._last_run_history import (
+    LastRunHistory,
+    LastRunAttemptStarted,
+    LastRunAttemptFinished,
+)
+from scheduling_util._types import Outcome
 
 logger = getLogger(__name__)
 
@@ -28,39 +34,37 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 
-class LastRunState(TypedDict):
-    """
-    All information that might influence whether a job should run at a given time.
-    """
-
-    last_attempted: datetime | None
-    """
-    The start time of the last attempt.
-    """
-
-    last_successful: datetime | None
-    """
-    The end time of the last successful attempt.
-    """
-
-    last_failed: datetime | None
-    """
-    The end time of the last failed attempt.
-    """
-
-    n_consecutive_failures: int
-    """
-    The number of consecutive failures.
-    """
-
-    last_failure: BaseException | str | None
-    """
-    The exception or error message of the last failed attempt.
-    """
-
-
 class ShouldRunCallable(Protocol):
-    def __call__(self, *, now: datetime, state: LastRunState) -> bool: ...
+    def __call__(
+        self,
+        *,
+        now: datetime,
+        history: LastRunHistory,
+    ) -> bool: ...
+
+
+class AssessResultCallable(Protocol):
+    def __call__(
+        self,
+        *,
+        returned: R | None,
+        raised: BaseException | None,
+    ) -> Tuple[Outcome, str]: ...
+
+
+def default_assess_result(
+    *,
+    returned: R | None,
+    raised: BaseException | None,
+) -> Tuple[Outcome, str]:
+    outcome: Outcome
+    if raised:
+        details = f"Raised `{type(raised).__name__}`: {raised}"
+        outcome = "failure"
+    else:
+        details = ""
+        outcome = "success"
+    return outcome, details
 
 
 class LastRun:
@@ -72,75 +76,49 @@ class LastRun:
     while also preventing failed jobs from retrying too often.
     """
 
-    _path: Path
     _name: str
 
-    _state: LastRunState
+    _history: LastRunHistory
 
     def __init__(
         self,
         *,
         path: Path,
         name: str | None = None,
+        max_history_entries: int = 1000,
     ) -> None:
         """
         Args:
-            path:
-                The file where the details about the last runs are to be stored and read from.
-                This will be a JSON file.
+            path: The JSON file where the history of attempts is to be stored and read from.
             name:
                 The name of the job that is being run. Only used for logging.
                 If omitted, the stem of the file name is used.
+            max_history_entries:
+                The maximum number of history entries to keep.
+                A completed attempt normally adds two entries: one "started" entry and one "finished" entry.
         """
         if path.exists() and not path.is_file():
             raise ValueError(f"{path} exists but is not a file.")
 
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        self._path = path
         self._name = name or path.stem
-        self._state = read_state(path=path)
-
-    @property
-    def path(self) -> Path:
-        return self._path
+        self._history = LastRunHistory(max_entries=max_history_entries, path=path)
 
     @property
     def name(self) -> str:
         return self._name
 
     @property
-    def state(self) -> LastRunState:
-        return self._state
-
-    @state.setter
-    def state(self, value: LastRunState) -> None:
-        self._state = value
-        write_state(path=self.path, state=value)
-
-    def set_attempted(self) -> None:
-        self.state = {**self.state, "last_attempted": datetime.now()}
-
-    def set_successful(self) -> None:
-        self.state = {
-            **self.state,
-            "last_successful": datetime.now(),
-            "n_consecutive_failures": 0,
-        }
-
-    def set_failed(self, failure: str | BaseException) -> None:
-        self.state = {
-            **self.state,
-            "last_failed": datetime.now(),
-            "n_consecutive_failures": self.state["n_consecutive_failures"] + 1,
-            "last_failure": failure,
-        }
+    def history(self) -> LastRunHistory:
+        return self._history
 
     def wrap(
         self,
         *,
         f: Callable[P, R],
         should_run: ShouldRunCallable,
+        assess_result: AssessResultCallable = default_assess_result,
     ) -> Callable[P, R | None]:
         """
         Get a function that only runs if it has not run too recently.
@@ -148,34 +126,54 @@ class LastRun:
         I wanted to use a context manager for this, but it's not possible to skip the `with` block.
         See https://peps.python.org/pep-0377/
 
-        The original function signature is preserved, but the return type is changed from `R` to `R | None`,
-        because it will return `None` if the function call was skipped.
+        The original function signature is preserved, but the return type is changed from `R` to `R | None`.
+        `None` can be returned when:
+        - The function call was skipped.
+        - The function raised an exception which was then suppressed by the `assess_result` function.
 
         Args:
             f: The function to wrap.
             should_run: A predicate function that decides whether the function should run at a given time.
+            assess_result:
+                A predicate function that decides whether the function call was successful
+                and provides a string with extra details, such as a reason or an error message.
+                By default, any function that does not raise an exception is considered successful.
+                If the function raised an exception, returning "neutral" or "success" will suppress it.
+                You probably should not return "neutral" or "success" for things like `KeyboardInterrupt`.
         """
 
         def wrapper(*args: Any, **kwargs: Any) -> R | None:
             logger.debug(f"[{self._name}] Checking if it should run …")
-            if not should_run(now=datetime.now(), state=self.state):
+            if not should_run(now=datetime.now(), history=self.history):
                 logger.debug(f"[{self._name}] Skipped.")
                 return None
 
             logger.debug(f"[{self._name}] Started.")
-            self.set_attempted()
+            self.history.append(LastRunAttemptStarted(at=time.time()))
 
             try:
-                result = f(*args, **kwargs)
+                func_result = f(*args, **kwargs)
             except BaseException as e:
-                logger.debug(f"[{self._name}] Failed: {e}")
-                self.set_failed(failure=e)
-                raise e
+                logger.debug(f"[{self._name}] Raised `%s`: %s", type(e).__name__, e)
+                outcome, details = assess_result(returned=None, raised=e)
+                if outcome == "failure":
+                    raise e
+                # Reaching this means that the exception was suppressed because the `assess_result`
+                # function returned "success" or "neutral".
+                func_result = None
             else:
-                logger.debug(f"[{self._name}] Succeeded.")
-                self.set_successful()
+                logger.debug(f"[{self._name}] Returned `%s`.", str(func_result)[:100])
+                outcome, details = assess_result(returned=func_result, raised=None)
+            finally:
+                self.history.append(
+                    LastRunAttemptFinished(
+                        at=time.time(),
+                        outcome=outcome,
+                        details=details,
+                    )
+                )
 
-            return result
+            return func_result
 
         # Make the wrapper look exactly like the original function, except for the return type.
         wrap_result = update_wrapper(
@@ -191,64 +189,10 @@ class LastRun:
         return wrap_result
 
 
-def state_to_json_serializable(*, state: LastRunState) -> Dict[str, Any]:
-    return {
-        "last_attempted": encode_optional_iso_date(state["last_attempted"]),
-        "last_successful": encode_optional_iso_date(state["last_successful"]),
-        "last_failed": encode_optional_iso_date(state["last_failed"]),
-        "n_consecutive_failures": state["n_consecutive_failures"],
-        "last_failure": (
-            None if state["last_failure"] is None else str(state["last_failure"])
-        ),
-    }
-
-
-def write_state(*, path: Path, state: LastRunState) -> None:
-    with path.open("w") as f:
-        json.dump(
-            obj=state_to_json_serializable(state=state),
-            fp=f,
-            indent=2,
-        )
-
-
-def read_state(*, path: Path) -> LastRunState:
-    try:
-        with path.open("r") as f:
-            data = json.load(f)
-            return LastRunState(
-                last_attempted=parse_optional_iso_date(data.get("last_attempted")),
-                last_successful=parse_optional_iso_date(data.get("last_successful")),
-                last_failed=parse_optional_iso_date(data.get("last_failed")),
-                n_consecutive_failures=data.get("n_consecutive_failures", 0),
-                last_failure=data.get("last_failure"),
-            )
-    except FileNotFoundError:
-        # Default, empty state.
-        return LastRunState(
-            last_attempted=None,
-            last_successful=None,
-            last_failed=None,
-            n_consecutive_failures=0,
-            last_failure=None,
-        )
-
-
-def parse_optional_iso_date(data: str | None) -> datetime | None:
-    if data is None:
-        return None
-    return datetime.fromisoformat(data)
-
-
-def encode_optional_iso_date(data: datetime | None) -> str | None:
-    if data is None:
-        return None
-    return data.isoformat()
-
-
 def create_run_predicate(
     *,
     success_period: timedelta,
+    neutral_period: timedelta,
     failure_period: timedelta,
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
@@ -261,6 +205,10 @@ def create_run_predicate(
         success_period:
             The minimum time to wait after a successful run.
             E.g., if you typically want a job to run every 5 days, set this to 5 days.
+        neutral_period:
+            The minimum time to wait after a neutral (i.e., neither successful nor failed) run.
+            E.g., a script might know that it has to wait for a specific thing to happen before it can succeed.
+            This time might be longer or shorter than either `success_period` or `failure_period`.
         failure_period:
             The minimum time to wait after a failed run.
             E.g., if you want to retry a failed job sooner, instead of waiting for the next schedule,
@@ -285,55 +233,47 @@ def create_run_predicate(
             check.ping_log(data=message)
             check.ping_failure()
 
-    def predicate(*, now: datetime, state: LastRunState) -> bool:
+    def predicate(*, now: datetime, history: LastRunHistory) -> bool:
         """
         Predicate function for `LastRun.wrap`.
         """
-        if state["n_consecutive_failures"] < 1:
-            if state["last_successful"] is None:
+        with history.lock():
+            last_finished = history.last_finished
+
+            if last_finished is None:
                 # The first run.
                 return True
 
-            # The previous attempt was successful. Follow the schedule.
-            return now - state["last_successful"] > success_period
+            if last_finished.outcome == "success":
+                # The previous attempt was successful. Follow the success schedule.
+                return now - last_finished.datetime > success_period
 
-        elif (
-            state["n_consecutive_failures"] < max_failures
-            or on_max_failures == "ignore"
-        ):
-            if state["last_failed"] is None:
-                # There was a previous failure, but we don't know when.
-                # This state should be impossible.
+            if last_finished.outcome == "neutral":
+                # The previous attempt was neutral. Follow the neutral schedule.
+                return now - last_finished.datetime > neutral_period
+
+            if (
+                history.n_failures_since_last_success < max_failures
+                or on_max_failures == "ignore"
+            ):
+                # The previous attempt failed, but not too many times.
+                return now - last_finished.datetime > failure_period
+
+            # The job failed too many times.
+            last_finished_json = last_finished.model_dump_json(indent=2)
+            last_success = history.last_success
+
+            if on_max_failures == "stall" or last_success is None:
                 report_error(
-                    f"The last failed time is missing:\n{json.dumps(obj=state_to_json_serializable(state=state), indent=2)}"
+                    f"Job stalled after {max_failures} tries. The last failure was:\n{last_finished_json}"
                 )
                 return False
 
-            # The previous attempt failed, but not too many times.
-            return now - state["last_failed"] > failure_period
-
-        # The job failed too many times.
-        match on_max_failures:
-
-            case "stall":
-                report_error(
-                    f"Job stalled after {max_failures} tries:\n{state['last_failure']}"
-                )
-                return False
-
-            case "success_schedule":
-                if state["last_successful"] is None:
-                    report_error(
-                        f"Job stalled after {max_failures} tries:\n{state['last_failure']}"
-                    )
-                    return False
-
+            if on_max_failures == "success_schedule":
                 # Run again `success_period` after the last successful run, if there is one.
-                return now - state["last_successful"] > success_period
+                return now - last_success.datetime > success_period
 
-        report_error(
-            f"Don't know what to do with state:\n{json.dumps(obj=state_to_json_serializable(state=state), indent=2)}"
-        )
-        return False
+            report_error("Unexpected state.")
+            return False
 
     return predicate

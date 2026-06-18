@@ -78,6 +78,17 @@ logger = getLogger(__name__)
     ),
 )
 @click.option(
+    "--neutral-period",
+    default="1d",
+    show_default=True,
+    type=ClickDuration(),
+    help=(
+        "The minimum time to wait after a neutral run. "
+        "A neutral run is neither a success nor a failure, e.g., when waiting for something else to complete. "
+        "Examples: `5m`, `1h`, `2d`, `1w`."
+    ),
+)
+@click.option(
     "--failure-period",
     default="1d",
     show_default=True,
@@ -312,6 +323,7 @@ def schedule_cli__on_result(
     description: str | None,
     cache_dir: Path,
     success_period: Duration,
+    neutral_period: Duration,
     failure_period: Duration,
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
@@ -334,6 +346,7 @@ def schedule_cli__on_result(
         last_run_dir=cache_dir / "last_run",
         last_run_reset=reset,
         success_period=success_period,
+        neutral_period=neutral_period,
         failure_period=failure_period,
         max_failures=max_failures,
         on_max_failures=on_max_failures,
