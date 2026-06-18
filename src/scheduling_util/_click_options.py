@@ -173,3 +173,24 @@ def create_click_csv_callback(
             return unique_strings  # type: ignore[return-value]
 
     return param_callback
+
+
+click_option__exit_codes_success = click.option(
+    "--exit-codes-success",
+    default="0",
+    show_default=False,
+    help="A comma-separated list of exit codes that are considered successful. "
+    "By default, only `0` is considered successful, and everything else is considered a failure. "
+    "A success ping will be sent if the subprocess exits with one of these.",
+    callback=create_click_csv_callback(value_callback=int),
+)
+
+click_option__exit_codes_neutral = click.option(
+    "--exit-codes-neutral",
+    default="",
+    show_default=False,
+    help="A comma-separated list of exit codes that are considered neutral. "
+    "By default, no status code is considered neutral. "
+    "No ping (neither success nor failure) will be sent if the subprocess exits with one of these.",
+    callback=create_click_csv_callback(value_callback=int),
+)
