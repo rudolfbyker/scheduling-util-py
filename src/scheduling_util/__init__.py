@@ -14,6 +14,7 @@ from ._rate_limiter import (
 from ._schedule import schedule, repeat
 from ._schedule_cli import schedule_cli
 from ._send_errors_to_slack import send_errors_to_slack, error_to_slack
+from ._types import Outcome
 
 __all__ = [
     "attach_extra_callbacks_to_log_formatter",
@@ -23,6 +24,7 @@ __all__ = [
     "LastRun",
     "LastRunState",
     "LogRedactor",
+    "Outcome",
     "RateLimiter",
     "RateLimiterProtocol",
     "repeat",
