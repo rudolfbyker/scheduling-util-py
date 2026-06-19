@@ -5,10 +5,7 @@
 
 ## Code formatting
 
-- Use `venv/bin/black`.
-- Never run `black` on ignored files.
-- Install `black` using `venv/bin/pip install black` if necessary.
-- To format the entire repo: `venv/bin/black .`.
+I use `black` but you should not run it.
 
 ## Type checking
 
