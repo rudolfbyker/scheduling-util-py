@@ -6,7 +6,7 @@ from importlib import import_module
 from logging import getLogger, INFO, getLevelName, getLevelNamesMapping
 from pathlib import Path
 from subprocess import list2cmdline
-from typing import Literal, Callable, Tuple, Any
+from typing import Literal, Callable, Tuple, Any, Collection
 
 import click
 from click import UsageError
@@ -235,11 +235,11 @@ def click_invoke(
                 command.invoke(command_context)
             except SystemExit as invoked_e:
                 # Do not let the exit code of the invoked command affect the exit code of the scheduler.
-                if invoked_e.code in exit_codes_neutral:
-                    return "neutral"
-                if invoked_e.code in exit_codes_success:
-                    return "success"
-                return "failure"
+                return map_exit_code_to_outcome(
+                    e=invoked_e,
+                    exit_codes_success=exit_codes_success,
+                    exit_codes_neutral=exit_codes_neutral,
+                )
 
         return "success"
 
@@ -281,11 +281,11 @@ def py_exec(
             exec(code)
         except SystemExit as exec_e:
             # If the executed code calls `sys.exit()`, it should not affect the exit code of the scheduler.
-            if exec_e.code in exit_codes_neutral:
-                return "neutral"
-            if exec_e.code in exit_codes_success:
-                return "success"
-            return "failure"
+            return map_exit_code_to_outcome(
+                e=exec_e,
+                exit_codes_success=exit_codes_success,
+                exit_codes_neutral=exit_codes_neutral,
+            )
 
         return "success"
 
@@ -444,3 +444,29 @@ def schedule_cli__on_result(
             path=cache_dir / "rate_limiter" / "slack_errors",
         ),
     )
+
+
+def map_exit_code_to_outcome(
+    *,
+    e: SystemExit,
+    exit_codes_neutral: Collection[int],
+    exit_codes_success: Collection[int],
+) -> Outcome:
+    code = e.code
+
+    if code is None:
+        # `sys.exit()` is equivalent to `sys.exit(0)`.
+        code = 0
+
+    if not isinstance(code, int):
+        # We don't have special handling for string exit codes,
+        # so just let this fail.
+        return "failure"
+
+    if code in exit_codes_neutral:
+        return "neutral"
+
+    if code in exit_codes_success:
+        return "success"
+
+    return "failure"
