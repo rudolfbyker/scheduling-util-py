@@ -9,7 +9,9 @@ from subprocess import list2cmdline
 from typing import Literal, Callable, Tuple, Any
 
 import click
+from click import UsageError
 from click_pendulum import Duration as ClickDuration
+from ordered_set import OrderedSet
 from pendulum import Duration
 from run_with_logger import run_with_logger
 
@@ -23,10 +25,13 @@ from ._click_options import (
     click_option__hc_uuid,
     click_option__heartbeat_path,
     click_type__log_level,
+    click_option__exit_codes_success,
+    click_option__exit_codes_neutral,
 )
 from ._logging_util import stream_logs_to_stderr
 from ._rate_limiter import RateLimiter
 from ._schedule import schedule
+from ._types import Outcome
 
 logger = getLogger(__name__)
 
@@ -171,13 +176,17 @@ def schedule_cli(
     help="Control how the invoked command reads environment variables. "
     "See the Click documentation.",
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def click_invoke(
     *,
     command_str: str,
     auto_envvar_prefix: str | None,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     args: Tuple[str, ...],
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule another Click command.
     Run it in the same process using `click.Context.invoke`.
@@ -199,14 +208,24 @@ def click_invoke(
             f"`{command_str}` is not a Click command, but `{type(command).__name__}`."
         )
 
-    def func() -> None:
+    def func() -> Outcome:
         with command.make_context(
             command.name,
             list(args),
             parent=None,  # Don't make our command the parent of this command, to keep things separated.
             auto_envvar_prefix=auto_envvar_prefix,
         ) as command_context:
-            command.invoke(command_context)
+            try:
+                command.invoke(command_context)
+            except SystemExit as invoked_e:
+                # Do not let the exit code of the invoked command affect the exit code of the scheduler.
+                if invoked_e.code in exit_codes_neutral:
+                    return "neutral"
+                if invoked_e.code in exit_codes_success:
+                    return "success"
+                return "failure"
+
+        return "success"
 
     return func
 
@@ -216,6 +235,8 @@ def click_invoke(
         ignore_unknown_options=True,
     )
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.option(
     "--code",
     required=True,
@@ -223,16 +244,29 @@ def click_invoke(
 )
 def py_exec(
     *,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     code: str,
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule Python code.
 
     The code will run in the same process as this script.
     """
 
-    def func() -> None:
-        exec(code)
+    def func() -> Outcome:
+        # noinspection PyBroadException
+        try:
+            exec(code)
+        except SystemExit as exec_e:
+            # If the executed code calls `sys.exit()`, it should not affect the exit code of the scheduler.
+            if exec_e.code in exit_codes_neutral:
+                return "neutral"
+            if exec_e.code in exit_codes_success:
+                return "success"
+            return "failure"
+
+        return "success"
 
     return func
 
@@ -250,10 +284,14 @@ def py_exec(
 )
 @click.option(
     "--check/--no-check",
-    default=True,
-    show_default=True,
-    help="Whether to call `subprocess.run` with `check=True`",
+    default=None,
+    show_default=False,
+    help="Whether to call `subprocess.run` with `check=True`. "
+    "Defaults to --check if none of the `--exit-codes-*` options are given, otherwise --no-check. "
+    "Do not use `--check` together with any of the `--exit-codes-*` options.",
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.option(
     "--log-level",
     default=getLevelName(INFO),
@@ -269,25 +307,48 @@ def py_exec(
 def subprocess(
     *,
     shell: bool,
-    check: bool,
+    check: bool | None,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     log_level: str,
     args: Tuple[str, ...],
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule a shell command.
     Run it in a subprocess using `run_with_logger` (which uses `subprocess.run`).
 
     ARGS: The arguments to pass to the subprocess.
     """
+    if check is None:
+        check = exit_codes_success == {0} and not exit_codes_neutral
 
-    def func() -> None:
-        run_with_logger(
+    if check:
+        if exit_codes_success != {0}:
+            raise UsageError(
+                "Do not use `--check` and `--exit-codes-success` together."
+            )
+        if exit_codes_neutral:
+            raise UsageError(
+                "Do not use `--check` and `--exit-codes-neutral` together."
+            )
+
+    def func() -> Outcome:
+        assert check is not None
+
+        completed = run_with_logger(
             args=args_for_subprocess_run(shell=shell, args=args),
             shell=shell,
             logger=logger.getChild("subprocess"),
             level=getLevelNamesMapping().get(log_level, INFO),
             check=check,
         )
+
+        if completed.returncode in exit_codes_neutral:
+            return "neutral"
+        elif completed.returncode in exit_codes_success:
+            return "success"
+        else:
+            return "failure"
 
     return func
 
@@ -309,7 +370,7 @@ def args_for_subprocess_run(
 
 @schedule_cli.result_callback()
 def schedule_cli__on_result(
-    func: Callable[[], None],
+    func: Callable[[], Outcome],
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,

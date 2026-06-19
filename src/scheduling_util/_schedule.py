@@ -5,7 +5,7 @@ from datetime import timedelta
 from logging import getLogger
 from pathlib import Path
 from time import sleep
-from typing import Literal, Callable, Any
+from typing import Literal, Callable, Any, Tuple
 from uuid import uuid4
 
 from hcio_client import HealthChecks, HealthCheck
@@ -13,6 +13,7 @@ from hcio_client import HealthChecks, HealthCheck
 from ._last_run import create_run_predicate, LastRun
 from ._rate_limiter import RateLimiter
 from ._send_errors_to_slack import send_errors_to_slack
+from ._types import Outcome
 
 logger = getLogger(__name__)
 
@@ -37,7 +38,7 @@ def schedule(
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
     max_history_entries: int = 1000,
-    func: Callable[[], None],
+    func: Callable[[], Outcome],
     slack_webhook: str | None = None,
     slack_rate_limiter: RateLimiter,
 ) -> None:
@@ -76,7 +77,13 @@ def schedule(
         max_history_entries:
             The maximum number of history entries to keep.
             A completed attempt normally adds two entries: one "started" entry and one "finished" entry.
-        func: The function to run at each interval.
+        func:
+            The function to run at each interval.
+            It must return "success", "failure", or "neutral".
+            - Returned "success": Sends a success ping to `healthchecks.io`.
+            - Returned "neutral": Does not report anything.
+            - Returned "failure": Sends a failure ping to `healthchecks.io`.
+            - Raised exception: Sends a failure ping to `healthchecks.io` and reports the exception to Slack.
         slack_webhook: If provided, errors will be posted to this Slack webhook URL.
         slack_rate_limiter: Rate limiter for posting messages to Slack.
     """
@@ -112,13 +119,14 @@ def schedule(
             desc=description,
             timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
             grace=int(hc_grace.total_seconds()) if hc_grace else None,
+            suppress_success_ping_on_exit=True,
         )
         # To ping a health check, we need (the UUID) || (the slug && the ping key).
         if (hc_uuid or (hc_ping_key and name))
         else None
     )
 
-    predicate = create_run_predicate(
+    should_run = create_run_predicate(
         success_period=success_period,
         neutral_period=neutral_period,
         failure_period=failure_period,
@@ -133,11 +141,39 @@ def schedule(
         last_run_path.unlink(missing_ok=True)
     last_run = LastRun(path=last_run_path, max_history_entries=max_history_entries)
 
-    def hc_func() -> None:
+    def hc_func() -> Outcome:
         with check or nullcontext():
-            func()
+            result = func()
+            logger.info("Result for `%s` is `%s`.", name, result)
+            if check:
+                if result == "success":
+                    check.ping_success()
+                elif result == "failure":
+                    check.ping_failure()
+        return result
 
-    wrapped_function = last_run.wrap(f=hc_func, should_run=predicate)
+    def assess_result(
+        *,
+        returned: Any,
+        raised: BaseException | None,
+    ) -> Tuple[Outcome, str]:
+        outcome: Outcome
+        if raised:
+            return "failure", f"Raised `{type(raised).__name__}`: {raised}"
+
+        if returned == "failure":
+            return "failure", ""
+
+        if returned == "neutral":
+            return "neutral", ""
+
+        return "success", ""
+
+    wrapped_function = last_run.wrap(
+        f=hc_func,
+        should_run=should_run,
+        assess_result=assess_result,
+    )
 
     def attempt() -> None:
         if heartbeat_path is not None:
