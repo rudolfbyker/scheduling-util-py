@@ -12,6 +12,7 @@ dependencies = [
     "click_pendulum==0.*",
     "coloredlogs==15.*",
     "hcio_client @ https://github.com/rudolfbyker/healthchecks-io-python-client/releases/download/0.0.8/hcio_client-0.0.8-py3-none-any.whl",
+    "ordered_set==4.*",
     "pendulum==3.*",
     "pydantic==2.*",
     "requests==2.*",
