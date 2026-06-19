@@ -89,7 +89,9 @@ class LastRunHistory:
         """
         A snapshot of the current list of history entries.
         """
-        return self._entries[:]
+        with self.lock():
+            self._refresh_from_file_without_lock()
+            return self._entries[:]
 
     def _discard_old_entries(self) -> None:
         while len(self._entries) > self._max_entries:
@@ -114,25 +116,43 @@ class LastRunHistory:
             return
 
         with self.lock():
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_bytes(
-                TypeAdapter(list[LastRunHistoryEntry]).dump_json(
-                    self._entries, indent=2
-                )
-            )
+            self._persist_to_file_without_lock()
 
     def load_from_file(self) -> None:
         if not self._path:
             return
 
         with self.lock():
-            self._entries = load_history_entries_from_file(self._path)
+            self._load_from_file_without_lock()
 
     def append(self, entry: LastRunHistoryEntry) -> None:
         with self.lock():
+            self._refresh_from_file_without_lock()
             self._entries.append(entry)
             self._discard_old_entries()
-            self.persist_to_file()
+            self._persist_to_file_without_lock()
+
+    def _load_from_file_without_lock(self) -> None:
+        if not self._path:
+            return
+
+        self._entries = load_history_entries_from_file(self._path)
+        self._discard_old_entries()
+
+    def _refresh_from_file_without_lock(self) -> None:
+        if not self._path or not self._path.exists():
+            return
+
+        self._load_from_file_without_lock()
+
+    def _persist_to_file_without_lock(self) -> None:
+        if not self._path:
+            return
+
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_bytes(
+            TypeAdapter(list[LastRunHistoryEntry]).dump_json(self._entries, indent=2)
+        )
 
     @property
     def n_failures_since_last_success(self) -> int:
@@ -141,6 +161,7 @@ class LastRunHistory:
         or since the start of the history if there is no successful attempt.
         """
         with self.lock():
+            self._refresh_from_file_without_lock()
             n = 0
             for entry in reversed(self._entries):
                 if not isinstance(entry, LastRunAttemptFinished):
@@ -174,6 +195,7 @@ class LastRunHistory:
             A history entry, or `None`.
         """
         with self.lock():
+            self._refresh_from_file_without_lock()
             if outcome is not None:
                 finished = True
 

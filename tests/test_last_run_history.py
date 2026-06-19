@@ -1,7 +1,11 @@
 import json
+import os
 import unittest
+from multiprocessing import get_context
 from pathlib import Path
+from queue import Empty
 from tempfile import TemporaryDirectory
+from typing import Any
 
 from scheduling_util._last_run_history import (
     LastRunAttemptFinished,
@@ -10,6 +14,35 @@ from scheduling_util._last_run_history import (
 )
 
 LOGGER_NAME = "scheduling_util._last_run_history"
+
+
+def _append_shared_history_entries(
+    *,
+    path: str,
+    worker_id: int,
+    n_entries: int,
+    barrier: Any,
+    results: Any,
+) -> None:
+    try:
+        barrier.wait(timeout=10)
+        history = LastRunHistory(max_entries=10_000, path=Path(path))
+
+        for i in range(n_entries):
+            # Exercise reads while other processes are writing the same file.
+            _ = history.last_finished
+            history.append(
+                LastRunAttemptFinished(
+                    at=worker_id * 1000 + i,
+                    outcome="failure",
+                    details=f"{worker_id}:{i}",
+                )
+            )
+            _ = history.n_failures_since_last_success
+
+        results.put(("ok", worker_id))
+    except BaseException as e:
+        results.put(("error", worker_id, repr(e)))
 
 
 class TestLastRunHistory(unittest.TestCase):
@@ -187,6 +220,72 @@ class TestLastRunHistory(unittest.TestCase):
         joined_log_messages = "\n".join(log_messages)
         self.assertIn("Ignoring invalid history file", joined_log_messages)
         self.assertIn("expected a list", joined_log_messages)
+
+    @unittest.skipUnless(os.name == "posix", "Linux-only fcntl locking")
+    def test_concurrent_processes_preserve_all_appended_entries(self) -> None:
+        ctx: Any = get_context("fork")
+        n_processes = 6
+        n_entries_per_process = 8
+
+        with TemporaryDirectory() as tmp_dir_str:
+            path = Path(tmp_dir_str) / "last-run.json"
+            barrier = ctx.Barrier(n_processes)
+            results = ctx.Queue()
+            processes = [
+                ctx.Process(
+                    target=_append_shared_history_entries,
+                    kwargs={
+                        "path": path.as_posix(),
+                        "worker_id": worker_id,
+                        "n_entries": n_entries_per_process,
+                        "barrier": barrier,
+                        "results": results,
+                    },
+                )
+                for worker_id in range(n_processes)
+            ]
+
+            try:
+                for process in processes:
+                    process.start()
+
+                actual_results = []
+                for _ in processes:
+                    try:
+                        actual_results.append(results.get(timeout=15))
+                    except Empty:
+                        self.fail("Timed out waiting for worker process result.")
+
+                for process in processes:
+                    process.join(timeout=15)
+                    self.assertFalse(process.is_alive())
+                    self.assertEqual(0, process.exitcode)
+
+                reread = LastRunHistory(max_entries=10_000, path=path)
+                entries = reread.entries
+            finally:
+                for process in processes:
+                    if process.is_alive():
+                        process.terminate()
+                        process.join(timeout=5)
+
+        self.assertEqual(
+            [("ok", worker_id) for worker_id in range(n_processes)],
+            sorted(actual_results),
+        )
+        self.assertEqual(n_processes * n_entries_per_process, len(entries))
+        self.assertEqual(
+            {
+                f"{worker_id}:{i}"
+                for worker_id in range(n_processes)
+                for i in range(n_entries_per_process)
+            },
+            {
+                entry.details
+                for entry in entries
+                if isinstance(entry, LastRunAttemptFinished)
+            },
+        )
 
 
 if __name__ == "__main__":
