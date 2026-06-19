@@ -214,9 +214,9 @@ def create_run_predicate(
             E.g., if you want to retry a failed job sooner, instead of waiting for the next schedule,
             make this smaller than `success_period`.
         max_failures:
-            The maximum number of consecutive failures.
+            The maximum number of failures (since the last success) before taking an action based on `on_max_failures`.
         on_max_failures:
-            What to do if the job failed more than `max_failures` times.
+            What to do if the job failed more than `max_failures` times (since the last success):
 
                 - "ignore": Keep retrying indefinitely. `max_failures` is ignored.
                 - "stall": Human intervention is required before the job will run again.

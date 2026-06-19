@@ -120,7 +120,7 @@ def validate_exit_code_sets(
     default=3,
     show_default=True,
     type=int,
-    help="The maximum number of consecutive failures.",
+    help="The maximum number of failures (since the last success) before taking an action based on `--on-max-failures`.",
 )
 @click.option(
     "--on-max-failures",
@@ -128,7 +128,7 @@ def validate_exit_code_sets(
     show_default=True,
     type=click.Choice(["ignore", "stall", "success_schedule"], case_sensitive=True),
     help=(
-        "What to do if the job failed more than `--max-failures` times. "
+        "What to do if the job failed more than `--max-failures` times (since the last success):"
         "\n  - ignore: Keep retrying indefinitely (ignore `--max-failures`). "
         "\n  - stall: Require human intervention before the job runs again. "
         "\n  - success_schedule: Run again `--success-period` after the last successful run (if any)."

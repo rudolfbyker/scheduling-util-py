@@ -72,8 +72,15 @@ def schedule(
         success_period: The minimum time to wait after a successful run before allowing the next run.
         neutral_period: The minimum time to wait after a neutral run before allowing the next run.
         failure_period: The minimum time to wait after a failed run before allowing the next run.
-        max_failures: The maximum number of consecutive failures before taking action based on `on_max_failures`.
-        on_max_failures: What to do if the job failed more than `max_failures` times.
+        max_failures:
+            The maximum number of failures (since the last success) before taking an action based on `on_max_failures`.
+        on_max_failures:
+            What to do if the job failed more than `max_failures` times (since the last success):
+
+                - "ignore": Keep retrying indefinitely. `max_failures` is ignored.
+                - "stall": Human intervention is required before the job will run again.
+                - "success_period": Run again `success_period` after the last successful run, if there is one.
+                  This is only useful if `success_period` is larger than `failure_period`.
         max_history_entries:
             The maximum number of history entries to keep.
             A completed attempt normally adds two entries: one "started" entry and one "finished" entry.
