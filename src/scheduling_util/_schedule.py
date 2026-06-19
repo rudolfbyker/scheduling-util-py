@@ -150,13 +150,20 @@ def schedule(
 
     def hc_func() -> Outcome:
         with check or nullcontext():
-            result = func()
+            result: Outcome = func()
             logger.info("Result for `%s` is `%s`.", name, result)
             if check:
                 if result == "success":
                     check.ping_success()
                 elif result == "failure":
                     check.ping_failure()
+                elif result == "neutral":
+                    # Don't ping.
+                    pass
+                else:
+                    logger.error("Unexpected result from `%s`: `%s`", name, result)
+                    result = "failure"
+
         return result
 
     def assess_result(
