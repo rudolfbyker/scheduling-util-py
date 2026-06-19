@@ -141,10 +141,195 @@ logger.info("hello from py-exec")
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._schedule_cli INFO: hello from py-exec",
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
             )
+
+    def test_py_exec__exception(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "py-exec",
+                    "--code",
+                    """\
+raise RuntimeError("error from py-exec")
+""",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._send_errors_to_slack ERROR: RuntimeError: error from py-exec",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_py_exec__exit_code_failure(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "py-exec",
+                    "--code",
+                    """\
+import sys
+sys.exit(16)
+""",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `failure`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_py_exec__exit_code_neutral(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "py-exec",
+                    "--exit-codes-neutral=16",
+                    "--code",
+                    """\
+import sys
+sys.exit(16)
+""",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `neutral`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_py_exec__exit_code_success(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "py-exec",
+                    "--exit-codes-success=16",
+                    "--code",
+                    """\
+import sys
+sys.exit(16)
+""",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_exit_code_success_and_neutral_must_not_overlap(self) -> None:
+        cases = [
+            [
+                "py-exec",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                "--code=pass",
+            ],
+            [
+                "click-invoke",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                "--command=scheduling_util:hello",
+            ],
+            [
+                "subprocess",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                sys.executable,
+                "-c",
+                "pass",
+            ],
+        ]
+
+        for args in cases:
+            with self.subTest(command=args[0]):
+                with TemporaryDirectory() as tmp_dir_str:
+                    result = CliRunner().invoke(
+                        schedule_cli,
+                        [
+                            "--max-runs=1",
+                            "--cache-dir",
+                            tmp_dir_str,
+                            *args,
+                        ],
+                    )
+
+                self.assertEqual(2, result.exit_code, result.output)
+                self.assertIn(
+                    "Exit codes cannot be both successful and neutral: 16.",
+                    result.output,
+                )
 
     def test_click_invoke(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
@@ -174,6 +359,136 @@ logger.info("hello from py-exec")
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._example_commands INFO: Hello Bertus!",
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_click_invoke__exception(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "click-invoke",
+                    "--command=scheduling_util:raise_exception",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._send_errors_to_slack ERROR: ClickException: meh",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_click_invoke__exit_code_failure(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "click-invoke",
+                    "--command=scheduling_util:exit_code",
+                    "--code=16",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `failure`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_click_invoke__exit_code_neutral(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "click-invoke",
+                    "--exit-codes-neutral=16",
+                    "--command=scheduling_util:exit_code",
+                    "--code=16",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `neutral`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_click_invoke__exit_code_success(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "click-invoke",
+                    "--exit-codes-success=16",
+                    "--command=scheduling_util:exit_code",
+                    "--code=16",
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -207,6 +522,7 @@ logger.info("hello from py-exec")
                 expected_code=0,
                 expected_stderr=[
                     "scheduling_util._schedule_cli.subprocess INFO: Hello world",
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -243,6 +559,7 @@ logger.info("hello from py-exec")
                 expected_stderr=[
                     "scheduling_util._schedule_cli.subprocess INFO: Hello",
                     "scheduling_util._schedule_cli.subprocess INFO: World",
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],
@@ -301,6 +618,7 @@ logger.info("hello from py-exec")
                     "--cache-dir",
                     str(tmp_dir),
                     "subprocess",
+                    "--check",
                     *command,
                 ],
                 capture_output=True,
@@ -351,10 +669,77 @@ logger.info("hello from py-exec")
                     ComparablePattern(
                         re.compile(
                             r"scheduling_util\._schedule_cli\.subprocess DEBUG: "
-                            r'Starting process: \[.*"raise SystemExit\(1\)".*\]'
+                            r'Starting process: \[.*"raise SystemExit\(1\)".*]'
                         )
                     ),
-                    "scheduling_util._last_run DEBUG: [test] Succeeded.",
+                    "scheduling_util._schedule INFO: Result for `test` is `failure`.",
+                    "scheduling_util._last_run DEBUG: [test] Returned `failure`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_subprocess__exit_code__neutral(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            command = [sys.executable, "-c", "raise SystemExit(16)"]
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "subprocess",
+                    "--exit-codes-neutral=16",
+                    *command,
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `neutral`.",
+                    "scheduling_util._schedule INFO: Done.",
+                ],
+                expected_stdout=[],
+            )
+
+    def test_subprocess__exit_code__success(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            command = [sys.executable, "-c", "raise SystemExit(16)"]
+
+            completed = run(
+                args=[
+                    sys.executable,
+                    schedule_script_path,
+                    "--log-level=info",
+                    "--max-runs=1",
+                    "--name=test",
+                    "--cache-dir",
+                    str(tmp_dir),
+                    "subprocess",
+                    "--exit-codes-success=16",
+                    *command,
+                ],
+                capture_output=True,
+                env=schedule_script_env(),
+            )
+
+            assert_process_result(
+                test=self,
+                actual_completed_process=completed,
+                expected_code=0,
+                expected_stderr=[
+                    "scheduling_util._schedule INFO: Result for `test` is `success`.",
                     "scheduling_util._schedule INFO: Done.",
                 ],
                 expected_stdout=[],

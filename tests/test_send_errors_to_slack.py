@@ -14,13 +14,17 @@ class TestSendErrorsToSlack(unittest.TestCase):
             target="scheduling_util._send_errors_to_slack.post",
             side_effect=ConnectionError("network down"),
         ) as post_mock:
-            with send_errors_to_slack(
-                slack_webhook="https://example.test/hook",
-                reraise=True,
-                limiter=limiter,
-                log_error=True,
+            with self.assertNoLogs(
+                "scheduling_util._send_errors_to_slack",
+                level="DEBUG",
             ):
-                pass
+                with send_errors_to_slack(
+                    slack_webhook="https://example.test/hook",
+                    reraise=True,
+                    limiter=limiter,
+                    log_error=True,
+                ):
+                    pass
 
         post_mock.assert_not_called()
         limiter.ping_if_ready.assert_not_called()
@@ -33,16 +37,24 @@ class TestSendErrorsToSlack(unittest.TestCase):
             target="scheduling_util._send_errors_to_slack.post",
             side_effect=ConnectionError("network down"),
         ) as post_mock:
-            with send_errors_to_slack(
-                slack_webhook="https://example.test/hook",
-                reraise=False,
-                limiter=limiter,
-                log_error=False,
-            ):
-                raise ValueError("boom")
+            with self.assertLogs(
+                "scheduling_util._send_errors_to_slack",
+                level="ERROR",
+            ) as logs:
+                with send_errors_to_slack(
+                    slack_webhook="https://example.test/hook",
+                    reraise=False,
+                    limiter=limiter,
+                    log_error=False,
+                ):
+                    raise ValueError("boom")
 
         limiter.ping_if_ready.assert_called_once_with()
         post_mock.assert_called_once()
+        self.assertEqual(
+            ["ConnectionError: network down"],
+            [r.message for r in logs.records],
+        )
         kwargs = post_mock.call_args.kwargs
         self.assertEqual("https://example.test/hook", kwargs["url"])
         self.assertEqual(30, kwargs["timeout"])
@@ -62,14 +74,23 @@ class TestSendErrorsToSlack(unittest.TestCase):
             target="scheduling_util._send_errors_to_slack.post",
             side_effect=ConnectionError("network down"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "explode"):
-                with send_errors_to_slack(
-                    slack_webhook="https://example.test/hook",
-                    reraise=True,
-                    limiter=limiter,
-                    log_error=False,
-                ):
-                    raise RuntimeError("explode")
+            with self.assertLogs(
+                "scheduling_util._send_errors_to_slack",
+                level="ERROR",
+            ) as logs:
+                with self.assertRaisesRegex(RuntimeError, "explode"):
+                    with send_errors_to_slack(
+                        slack_webhook="https://example.test/hook",
+                        reraise=True,
+                        limiter=limiter,
+                        log_error=False,
+                    ):
+                        raise RuntimeError("explode")
+
+        self.assertEqual(
+            ["ConnectionError: network down"],
+            [r.message for r in logs.records],
+        )
 
     def test_exception_without_webhook_skips_post_and_limiter(self) -> None:
         limiter = MagicMock(spec=RateLimiter)

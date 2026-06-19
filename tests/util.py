@@ -22,6 +22,14 @@ class AnyDate(date):
         return isinstance(__value, date)
 
 
+class AnyFloat(float):
+    def __new__(cls) -> Self:
+        return super().__new__(cls, 0.0)
+
+    def __eq__(self, __value: Any) -> bool:
+        return isinstance(__value, float)
+
+
 class MatchingException(BaseException):
     """
     Examples:

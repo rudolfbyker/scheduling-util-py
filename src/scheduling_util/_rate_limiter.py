@@ -7,43 +7,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator, Protocol
+from typing import Iterator, Protocol
 
-
-@contextmanager
-def _exclusive_path_lock(path: Path) -> Iterator[None]:
-    if os.name != "posix":
-        yield
-        return
-
-    import fcntl
-
-    fcntl_module: Any = fcntl
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = None
-    while True:
-        try:
-            fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL)
-            created = True
-            break
-        except FileExistsError:
-            try:
-                fd = os.open(path, os.O_RDWR)
-                created = False
-                break
-            except FileNotFoundError:
-                continue
-
-    assert fd is not None
-    with os.fdopen(fd, "r+") as lock_file:
-        fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_EX)
-        if created:
-            os.utime(path, (0, 0))
-        try:
-            yield
-        finally:
-            fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_UN)
+from scheduling_util._lock import exclusive_path_lock
 
 
 class RateLimiterProtocol(Protocol):
@@ -157,7 +123,7 @@ class RateLimiter:
             yield
             return
 
-        with _exclusive_path_lock(self.path):
+        with exclusive_path_lock(self.path):
             yield
 
 
@@ -330,5 +296,5 @@ class RollingWindowRateLimiter:
             yield
             return
 
-        with _exclusive_path_lock(self._lock_path()):
+        with exclusive_path_lock(self._lock_path()):
             yield

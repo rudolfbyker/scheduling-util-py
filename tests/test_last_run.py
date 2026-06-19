@@ -7,13 +7,13 @@ from tempfile import TemporaryDirectory
 from time import sleep
 from typing import Optional, Union
 
-from scheduling_util import LastRun, create_run_predicate, LastRunState
-from .util import AnyDateTime, MatchingException
+from scheduling_util import LastRun, create_run_predicate, LastRunHistory
+from scheduling_util._last_run_history import LastRunAttemptFinished
 
 
 def always(
     now: datetime,
-    state: LastRunState,
+    history: LastRunHistory,
 ) -> bool:
     return True
 
@@ -96,6 +96,7 @@ class TestLastRun(unittest.TestCase):
                 f=run,
                 should_run=create_run_predicate(
                     success_period=timedelta(seconds=0.1),
+                    neutral_period=timedelta(seconds=1),
                     failure_period=timedelta(seconds=10),
                     max_failures=0,
                     on_max_failures="ignore",
@@ -103,38 +104,70 @@ class TestLastRun(unittest.TestCase):
             )
 
             with self.assertLogs(level=DEBUG) as logs:
-                run_debounced()
-                self.assertEqual(n, 1)
+                self.assertEqual([], last.history.entries)
 
                 run_debounced()
                 self.assertEqual(n, 1)
 
+                self.assertEqual(
+                    ["started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
+
                 run_debounced()
                 self.assertEqual(n, 1)
+
+                self.assertEqual(
+                    ["started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
+
+                run_debounced()
+                self.assertEqual(n, 1)
+
+                self.assertEqual(
+                    ["started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
 
                 sleep(0.15)
 
                 run_debounced()
                 self.assertEqual(n, 2)
 
-                run_debounced()
-                self.assertEqual(n, 2)
+                self.assertEqual(
+                    ["started", "finished", "started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
 
                 run_debounced()
                 self.assertEqual(n, 2)
+
+                self.assertEqual(
+                    ["started", "finished", "started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
+
+                run_debounced()
+                self.assertEqual(n, 2)
+
+                self.assertEqual(
+                    ["started", "finished", "started", "finished"],
+                    [entry.kind for entry in last.history.entries],
+                )
 
         self.assertEqual(
             [
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Succeeded.",
+                "[test] Returned `None`.",
                 "[test] Checking if it should run …",
                 "[test] Skipped.",
                 "[test] Checking if it should run …",
                 "[test] Skipped.",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Succeeded.",
+                "[test] Returned `None`.",
                 "[test] Checking if it should run …",
                 "[test] Skipped.",
                 "[test] Checking if it should run …",
@@ -153,8 +186,8 @@ class TestLastRun(unittest.TestCase):
                 name="test",
             )
 
-            def run(message: str) -> None:
-                raise RuntimeError(message)
+            def run(msg: str) -> None:
+                raise RuntimeError(msg)
 
             run_debounced = last.wrap(f=run, should_run=always)
 
@@ -167,35 +200,45 @@ class TestLastRun(unittest.TestCase):
             [
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Failed: a",
+                "[test] Raised `RuntimeError`: a",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Failed: b",
+                "[test] Raised `RuntimeError`: b",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Failed: c",
+                "[test] Raised `RuntimeError`: c",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Failed: d",
+                "[test] Raised `RuntimeError`: d",
                 "[test] Checking if it should run …",
                 "[test] Started.",
-                "[test] Failed: e",
+                "[test] Raised `RuntimeError`: e",
             ],
             [r.message for r in logs.records],
         )
 
         self.assertEqual(
-            LastRunState(
-                last_attempted=AnyDateTime(),
-                last_failed=AnyDateTime(),
-                last_failure=MatchingException(
-                    match_message="e",
-                    match_type=RuntimeError,
-                ),
-                last_successful=None,
-                n_consecutive_failures=5,
-            ),
-            last.state,
+            [
+                "started",
+                "finished failure Raised `RuntimeError`: a",
+                "started",
+                "finished failure Raised `RuntimeError`: b",
+                "started",
+                "finished failure Raised `RuntimeError`: c",
+                "started",
+                "finished failure Raised `RuntimeError`: d",
+                "started",
+                "finished failure Raised `RuntimeError`: e",
+            ],
+            [
+                f"{entry.kind}"
+                + (
+                    f" {entry.outcome} {entry.details}"
+                    if isinstance(entry, LastRunAttemptFinished)
+                    else ""
+                )
+                for entry in last.history.entries
+            ],
         )
 
 
@@ -203,6 +246,7 @@ class TestCreateRunPredicate(unittest.TestCase):
     def test_on_max_failures__success_schedule(self) -> None:
         p = create_run_predicate(
             success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
             max_failures=3,
             on_max_failures="success_schedule",
@@ -211,84 +255,95 @@ class TestCreateRunPredicate(unittest.TestCase):
         t = datetime(2025, 1, 1, 12, 0, 0)
 
         with self.subTest("Initial state: Always run."):
-            self.assertTrue(
-                p(
-                    now=t,
-                    state=LastRunState(
-                        last_attempted=None,
-                        last_successful=None,
-                        last_failed=None,
-                        n_consecutive_failures=0,
-                        last_failure=None,
-                    ),
-                )
-            )
+            self.assertTrue(p(now=t, history=LastRunHistory()))
 
         with self.subTest("After a successful run: Wait for a day."):
-            success_5_min_ago = LastRunState(
-                last_attempted=t - timedelta(minutes=6),
-                last_successful=t - timedelta(minutes=5),
-                last_failed=None,
-                n_consecutive_failures=0,
-                last_failure=None,
+            success_5_min_ago = LastRunHistory(
+                entries=[
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=5)).timestamp(),
+                        outcome="success",
+                    )
+                ]
             )
-            self.assertFalse(p(now=t, state=success_5_min_ago))
-            self.assertFalse(p(now=t + timedelta(hours=23), state=success_5_min_ago))
-            self.assertTrue(p(now=t + timedelta(hours=25), state=success_5_min_ago))
+            self.assertFalse(p(now=t, history=success_5_min_ago))
+            self.assertFalse(p(now=t + timedelta(hours=23), history=success_5_min_ago))
+            self.assertTrue(p(now=t + timedelta(hours=25), history=success_5_min_ago))
 
         with self.subTest("After the first failed run: Wait for an hour."):
-            failure_5_min_ago = LastRunState(
-                last_attempted=t - timedelta(minutes=6),
-                last_successful=None,
-                last_failed=t - timedelta(minutes=5),
-                n_consecutive_failures=1,
-                last_failure=None,
+            failure_5_min_ago = LastRunHistory(
+                entries=[
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=5)).timestamp(),
+                        outcome="failure",
+                    )
+                ]
             )
-            self.assertFalse(p(now=t, state=failure_5_min_ago))
-            self.assertFalse(p(now=t + timedelta(minutes=55), state=failure_5_min_ago))
-            self.assertTrue(p(now=t + timedelta(minutes=65), state=failure_5_min_ago))
+            self.assertFalse(p(now=t, history=failure_5_min_ago))
+            self.assertFalse(
+                p(now=t + timedelta(minutes=55), history=failure_5_min_ago)
+            )
+            self.assertTrue(p(now=t + timedelta(minutes=65), history=failure_5_min_ago))
 
         with self.subTest(
             "After too many failed runs: Wait for a day after the last successful run."
         ):
-            too_many_failures = LastRunState(
-                last_attempted=t - timedelta(minutes=6),
-                last_successful=t - timedelta(hours=1),
-                last_failed=t - timedelta(minutes=5),
-                n_consecutive_failures=3,
-                last_failure="Meh",
+            too_many_failures = LastRunHistory(
+                entries=[
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=6)).timestamp(),
+                        outcome="success",
+                    ),
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=5)).timestamp(),
+                        outcome="failure",
+                        details="ugh",
+                    ),
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=4)).timestamp(),
+                        outcome="failure",
+                        details="meh",
+                    ),
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=3)).timestamp(),
+                        outcome="failure",
+                        details="boom",
+                    ),
+                ]
             )
-            self.assertFalse(p(now=t, state=too_many_failures))
-            self.assertFalse(p(now=t + timedelta(hours=22), state=too_many_failures))
-            self.assertTrue(p(now=t + timedelta(hours=24), state=too_many_failures))
+            self.assertFalse(p(now=t, history=too_many_failures))
+            self.assertFalse(p(now=t + timedelta(hours=22), history=too_many_failures))
+            self.assertTrue(p(now=t + timedelta(hours=24), history=too_many_failures))
 
         with self.subTest(
             "Too many failed runs, and no previous successful run: Log an error, and don't run."
         ):
-            too_many_failures_no_success = LastRunState(
-                last_attempted=t - timedelta(minutes=6),
-                last_successful=None,
-                last_failed=t - timedelta(minutes=5),
-                n_consecutive_failures=3,
-                last_failure="Meh",
+            too_many_failures_no_success = LastRunHistory(
+                entries=[
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=5)).timestamp(),
+                        outcome="failure",
+                        details="ugh",
+                    ),
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=4)).timestamp(),
+                        outcome="failure",
+                        details="meh",
+                    ),
+                    LastRunAttemptFinished(
+                        at=(t - timedelta(minutes=3)).timestamp(),
+                        outcome="failure",
+                        details="boom",
+                    ),
+                ]
             )
             with self.assertLogs(level=ERROR):
-                self.assertFalse(p(now=t, state=too_many_failures_no_success))
-
-        with self.subTest("Missing 'last failed' time"):
-            missing_last_failed = LastRunState(
-                last_attempted=t - timedelta(minutes=6),
-                last_successful=None,
-                last_failed=None,
-                n_consecutive_failures=1,
-                last_failure=None,
-            )
-            with self.assertLogs(level=ERROR):
-                self.assertFalse(p(now=t, state=missing_last_failed))
+                self.assertFalse(p(now=t, history=too_many_failures_no_success))
 
     def test_on_max_failures__stall(self) -> None:
         p = create_run_predicate(
             success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
             max_failures=3,
             on_max_failures="stall",
@@ -296,21 +351,38 @@ class TestCreateRunPredicate(unittest.TestCase):
 
         t = datetime(2025, 1, 1, 12, 0, 0)
 
-        too_many_failures = LastRunState(
-            last_attempted=t - timedelta(minutes=6),
-            last_successful=t - timedelta(hours=1),
-            last_failed=t - timedelta(minutes=5),
-            n_consecutive_failures=3,
-            last_failure="Meh",
+        too_many_failures = LastRunHistory(
+            entries=[
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=6)).timestamp(),
+                    outcome="success",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=5)).timestamp(),
+                    outcome="failure",
+                    details="ugh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=4)).timestamp(),
+                    outcome="failure",
+                    details="meh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=3)).timestamp(),
+                    outcome="failure",
+                    details="boom",
+                ),
+            ]
         )
         with self.assertLogs(level=ERROR):
-            self.assertFalse(p(now=t, state=too_many_failures))
+            self.assertFalse(p(now=t, history=too_many_failures))
         with self.assertLogs(level=ERROR):
-            self.assertFalse(p(now=t + timedelta(days=100), state=too_many_failures))
+            self.assertFalse(p(now=t + timedelta(days=100), history=too_many_failures))
 
     def test_on_max_failures__ignore(self) -> None:
         p = create_run_predicate(
             success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
             max_failures=1,
             on_max_failures="ignore",
@@ -318,19 +390,36 @@ class TestCreateRunPredicate(unittest.TestCase):
 
         t = datetime(2025, 1, 1, 12, 0, 0)
 
-        too_many_failures = LastRunState(
-            last_attempted=t - timedelta(minutes=6),
-            last_successful=t - timedelta(hours=1),
-            last_failed=t - timedelta(minutes=5),
-            n_consecutive_failures=10,
-            last_failure="Meh",
+        too_many_failures = LastRunHistory(
+            entries=[
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=6)).timestamp(),
+                    outcome="success",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=5)).timestamp(),
+                    outcome="failure",
+                    details="ugh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=4)).timestamp(),
+                    outcome="failure",
+                    details="meh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=3)).timestamp(),
+                    outcome="failure",
+                    details="boom",
+                ),
+            ]
         )
-        self.assertFalse(p(now=t, state=too_many_failures))
-        self.assertTrue(p(now=t + timedelta(hours=2), state=too_many_failures))
+        self.assertFalse(p(now=t, history=too_many_failures))
+        self.assertTrue(p(now=t + timedelta(hours=2), history=too_many_failures))
 
     def test_on_max_failures__invalid(self) -> None:
         p = create_run_predicate(
             success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
             max_failures=1,
             on_max_failures="foo",  # type: ignore[arg-type]
@@ -338,12 +427,28 @@ class TestCreateRunPredicate(unittest.TestCase):
 
         t = datetime(2025, 1, 1, 12, 0, 0)
 
-        too_many_failures = LastRunState(
-            last_attempted=t - timedelta(minutes=6),
-            last_successful=t - timedelta(hours=1),
-            last_failed=t - timedelta(minutes=5),
-            n_consecutive_failures=10,
-            last_failure="Meh",
+        too_many_failures = LastRunHistory(
+            entries=[
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=6)).timestamp(),
+                    outcome="success",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=5)).timestamp(),
+                    outcome="failure",
+                    details="ugh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=4)).timestamp(),
+                    outcome="failure",
+                    details="meh",
+                ),
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=3)).timestamp(),
+                    outcome="failure",
+                    details="boom",
+                ),
+            ]
         )
         with self.assertLogs(level=ERROR):
-            self.assertFalse(p(now=t, state=too_many_failures))
+            self.assertFalse(p(now=t, history=too_many_failures))

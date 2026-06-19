@@ -6,10 +6,12 @@ from importlib import import_module
 from logging import getLogger, INFO, getLevelName, getLevelNamesMapping
 from pathlib import Path
 from subprocess import list2cmdline
-from typing import Literal, Callable, Tuple, Any
+from typing import Literal, Callable, Tuple, Any, Collection
 
 import click
+from click import UsageError
 from click_pendulum import Duration as ClickDuration
+from ordered_set import OrderedSet
 from pendulum import Duration
 from run_with_logger import run_with_logger
 
@@ -23,12 +25,26 @@ from ._click_options import (
     click_option__hc_uuid,
     click_option__heartbeat_path,
     click_type__log_level,
+    click_option__exit_codes_success,
+    click_option__exit_codes_neutral,
 )
 from ._logging_util import stream_logs_to_stderr
 from ._rate_limiter import RateLimiter
 from ._schedule import schedule
+from ._types import Outcome
 
 logger = getLogger(__name__)
+
+
+def validate_exit_code_sets(
+    *,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
+) -> None:
+    overlap = [code for code in exit_codes_success if code in exit_codes_neutral]
+    if overlap:
+        codes = ", ".join(str(code) for code in overlap)
+        raise UsageError(f"Exit codes cannot be both successful and neutral: {codes}.")
 
 
 @click.group()
@@ -78,6 +94,17 @@ logger = getLogger(__name__)
     ),
 )
 @click.option(
+    "--neutral-period",
+    default="1d",
+    show_default=True,
+    type=ClickDuration(),
+    help=(
+        "The minimum time to wait after a neutral run. "
+        "A neutral run is neither a success nor a failure, e.g., when waiting for something else to complete. "
+        "Examples: `5m`, `1h`, `2d`, `1w`."
+    ),
+)
+@click.option(
     "--failure-period",
     default="1d",
     show_default=True,
@@ -93,7 +120,7 @@ logger = getLogger(__name__)
     default=3,
     show_default=True,
     type=int,
-    help="The maximum number of consecutive failures.",
+    help="The maximum number of failures (since the last success) before taking an action based on `--on-max-failures`.",
 )
 @click.option(
     "--on-max-failures",
@@ -101,7 +128,7 @@ logger = getLogger(__name__)
     show_default=True,
     type=click.Choice(["ignore", "stall", "success_schedule"], case_sensitive=True),
     help=(
-        "What to do if the job failed more than `--max-failures` times. "
+        "What to do if the job failed more than `--max-failures` times (since the last success):"
         "\n  - ignore: Keep retrying indefinitely (ignore `--max-failures`). "
         "\n  - stall: Require human intervention before the job runs again. "
         "\n  - success_schedule: Run again `--success-period` after the last successful run (if any)."
@@ -160,17 +187,26 @@ def schedule_cli(
     help="Control how the invoked command reads environment variables. "
     "See the Click documentation.",
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def click_invoke(
     *,
     command_str: str,
     auto_envvar_prefix: str | None,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     args: Tuple[str, ...],
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule another Click command.
     Run it in the same process using `click.Context.invoke`.
     """
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
+
     if ":" not in command_str:
         raise ValueError(
             f"Command string must be in format 'module.path:function_name', got: {command_str}"
@@ -188,14 +224,24 @@ def click_invoke(
             f"`{command_str}` is not a Click command, but `{type(command).__name__}`."
         )
 
-    def func() -> None:
+    def func() -> Outcome:
         with command.make_context(
             command.name,
             list(args),
             parent=None,  # Don't make our command the parent of this command, to keep things separated.
             auto_envvar_prefix=auto_envvar_prefix,
         ) as command_context:
-            command.invoke(command_context)
+            try:
+                command.invoke(command_context)
+            except SystemExit as invoked_e:
+                # Do not let the exit code of the invoked command affect the exit code of the scheduler.
+                return map_exit_code_to_outcome(
+                    e=invoked_e,
+                    exit_codes_success=exit_codes_success,
+                    exit_codes_neutral=exit_codes_neutral,
+                )
+
+        return "success"
 
     return func
 
@@ -205,6 +251,8 @@ def click_invoke(
         ignore_unknown_options=True,
     )
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.option(
     "--code",
     required=True,
@@ -212,16 +260,34 @@ def click_invoke(
 )
 def py_exec(
     *,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     code: str,
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule Python code.
 
     The code will run in the same process as this script.
     """
 
-    def func() -> None:
-        exec(code)
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
+
+    def func() -> Outcome:
+        # noinspection PyBroadException
+        try:
+            exec(code)
+        except SystemExit as exec_e:
+            # If the executed code calls `sys.exit()`, it should not affect the exit code of the scheduler.
+            return map_exit_code_to_outcome(
+                e=exec_e,
+                exit_codes_success=exit_codes_success,
+                exit_codes_neutral=exit_codes_neutral,
+            )
+
+        return "success"
 
     return func
 
@@ -239,10 +305,14 @@ def py_exec(
 )
 @click.option(
     "--check/--no-check",
-    default=True,
-    show_default=True,
-    help="Whether to call `subprocess.run` with `check=True`",
+    default=None,
+    show_default=False,
+    help="Whether to call `subprocess.run` with `check=True`. "
+    "Defaults to --check if none of the `--exit-codes-*` options are given, otherwise --no-check. "
+    "Do not use `--check` together with any of the `--exit-codes-*` options.",
 )
+@click_option__exit_codes_success
+@click_option__exit_codes_neutral
 @click.option(
     "--log-level",
     default=getLevelName(INFO),
@@ -258,25 +328,53 @@ def py_exec(
 def subprocess(
     *,
     shell: bool,
-    check: bool,
+    check: bool | None,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
     log_level: str,
     args: Tuple[str, ...],
-) -> Callable[[], None]:
+) -> Callable[[], Outcome]:
     """
     Schedule a shell command.
     Run it in a subprocess using `run_with_logger` (which uses `subprocess.run`).
 
     ARGS: The arguments to pass to the subprocess.
     """
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
 
-    def func() -> None:
-        run_with_logger(
+    if check is None:
+        check = exit_codes_success == {0} and not exit_codes_neutral
+
+    if check:
+        if exit_codes_success != {0}:
+            raise UsageError(
+                "Do not use `--check` and `--exit-codes-success` together."
+            )
+        if exit_codes_neutral:
+            raise UsageError(
+                "Do not use `--check` and `--exit-codes-neutral` together."
+            )
+
+    def func() -> Outcome:
+        assert check is not None
+
+        completed = run_with_logger(
             args=args_for_subprocess_run(shell=shell, args=args),
             shell=shell,
             logger=logger.getChild("subprocess"),
             level=getLevelNamesMapping().get(log_level, INFO),
             check=check,
         )
+
+        if completed.returncode in exit_codes_neutral:
+            return "neutral"
+        elif completed.returncode in exit_codes_success:
+            return "success"
+        else:
+            return "failure"
 
     return func
 
@@ -298,7 +396,7 @@ def args_for_subprocess_run(
 
 @schedule_cli.result_callback()
 def schedule_cli__on_result(
-    func: Callable[[], None],
+    func: Callable[[], Outcome],
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
@@ -312,6 +410,7 @@ def schedule_cli__on_result(
     description: str | None,
     cache_dir: Path,
     success_period: Duration,
+    neutral_period: Duration,
     failure_period: Duration,
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
@@ -334,6 +433,7 @@ def schedule_cli__on_result(
         last_run_dir=cache_dir / "last_run",
         last_run_reset=reset,
         success_period=success_period,
+        neutral_period=neutral_period,
         failure_period=failure_period,
         max_failures=max_failures,
         on_max_failures=on_max_failures,
@@ -344,3 +444,29 @@ def schedule_cli__on_result(
             path=cache_dir / "rate_limiter" / "slack_errors",
         ),
     )
+
+
+def map_exit_code_to_outcome(
+    *,
+    e: SystemExit,
+    exit_codes_neutral: Collection[int],
+    exit_codes_success: Collection[int],
+) -> Outcome:
+    code = e.code
+
+    if code is None:
+        # `sys.exit()` is equivalent to `sys.exit(0)`.
+        code = 0
+
+    if not isinstance(code, int):
+        # We don't have special handling for string exit codes,
+        # so just let this fail.
+        return "failure"
+
+    if code in exit_codes_neutral:
+        return "neutral"
+
+    if code in exit_codes_success:
+        return "success"
+
+    return "failure"

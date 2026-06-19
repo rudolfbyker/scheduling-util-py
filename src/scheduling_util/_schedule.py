@@ -5,7 +5,7 @@ from datetime import timedelta
 from logging import getLogger
 from pathlib import Path
 from time import sleep
-from typing import Literal, Callable, Any
+from typing import Literal, Callable, Any, Tuple
 from uuid import uuid4
 
 from hcio_client import HealthChecks, HealthCheck
@@ -13,6 +13,7 @@ from hcio_client import HealthChecks, HealthCheck
 from ._last_run import create_run_predicate, LastRun
 from ._rate_limiter import RateLimiter
 from ._send_errors_to_slack import send_errors_to_slack
+from ._types import Outcome
 
 logger = getLogger(__name__)
 
@@ -32,10 +33,12 @@ def schedule(
     last_run_dir: Path,
     last_run_reset: bool = False,
     success_period: timedelta,
+    neutral_period: timedelta,
     failure_period: timedelta,
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
-    func: Callable[[], None],
+    max_history_entries: int = 1000,
+    func: Callable[[], Outcome | None],
     slack_webhook: str | None = None,
     slack_rate_limiter: RateLimiter,
 ) -> None:
@@ -67,10 +70,27 @@ def schedule(
         last_run_dir: The directory in which to store the `LastRun` state files.
         last_run_reset: Whether to ignore the existing `LastRun` state files on the disk and start anew.
         success_period: The minimum time to wait after a successful run before allowing the next run.
+        neutral_period: The minimum time to wait after a neutral run before allowing the next run.
         failure_period: The minimum time to wait after a failed run before allowing the next run.
-        max_failures: The maximum number of consecutive failures before taking action based on `on_max_failures`.
-        on_max_failures: What to do if the job failed more than `max_failures` times.
-        func: The function to run at each interval.
+        max_failures:
+            The maximum number of failures (since the last success) before taking an action based on `on_max_failures`.
+        on_max_failures:
+            What to do if the job failed more than `max_failures` times (since the last success):
+
+                - "ignore": Keep retrying indefinitely. `max_failures` is ignored.
+                - "stall": Human intervention is required before the job will run again.
+                - "success_period": Run again `success_period` after the last successful run, if there is one.
+                  This is only useful if `success_period` is larger than `failure_period`.
+        max_history_entries:
+            The maximum number of history entries to keep.
+            A completed attempt normally adds two entries: one "started" entry and one "finished" entry.
+        func:
+            The function to run at each interval.
+            It must return "success", "failure", or "neutral".
+            - Returned "success": Sends a success ping to `healthchecks.io`.
+            - Returned "neutral": Does not report anything.
+            - Returned "failure": Sends a failure ping to `healthchecks.io`.
+            - Raised exception: Sends a failure ping to `healthchecks.io` and reports the exception to Slack.
         slack_webhook: If provided, errors will be posted to this Slack webhook URL.
         slack_rate_limiter: Rate limiter for posting messages to Slack.
     """
@@ -106,14 +126,16 @@ def schedule(
             desc=description,
             timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
             grace=int(hc_grace.total_seconds()) if hc_grace else None,
+            suppress_success_ping_on_exit=True,
         )
         # To ping a health check, we need (the UUID) || (the slug && the ping key).
         if (hc_uuid or (hc_ping_key and name))
         else None
     )
 
-    predicate = create_run_predicate(
+    should_run = create_run_predicate(
         success_period=success_period,
+        neutral_period=neutral_period,
         failure_period=failure_period,
         max_failures=max_failures,
         on_max_failures=on_max_failures,
@@ -124,13 +146,52 @@ def schedule(
     last_run_path = last_run_dir / f"{name or uuid4()}.json"
     if last_run_reset:
         last_run_path.unlink(missing_ok=True)
-    last_run = LastRun(path=last_run_path)
+    last_run = LastRun(path=last_run_path, max_history_entries=max_history_entries)
 
-    def hc_func() -> None:
+    def assess_return_value(returned: Any) -> Tuple[Outcome, str]:
+        if returned is None or returned == "success":
+            return "success", ""
+
+        if returned == "failure":
+            return "failure", ""
+
+        if returned == "neutral":
+            return "neutral", ""
+
+        return "failure", f"Unexpected result from `{name}`: `{returned}`"
+
+    def hc_func() -> Any:
         with check or nullcontext():
-            func()
+            result: Any = func()
+            logger.info("Result for `%s` is `%s`.", name, result)
+            outcome, details = assess_return_value(result)
 
-    wrapped_function = last_run.wrap(f=hc_func, should_run=predicate)
+            if details:
+                logger.error(details)
+
+            if check:
+                if outcome == "success":
+                    check.ping_success()
+                elif outcome == "failure":
+                    check.ping_failure()
+
+        return result
+
+    def assess_result(
+        *,
+        returned: Any,
+        raised: BaseException | None,
+    ) -> Tuple[Outcome, str]:
+        if raised is not None:
+            return "failure", f"Raised `{type(raised).__name__}`: {raised}"
+
+        return assess_return_value(returned)
+
+    wrapped_function = last_run.wrap(
+        f=hc_func,
+        should_run=should_run,
+        assess_result=assess_result,
+    )
 
     def attempt() -> None:
         if heartbeat_path is not None:

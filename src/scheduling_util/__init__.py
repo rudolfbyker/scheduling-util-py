@@ -1,5 +1,6 @@
-from ._example_commands import hello
-from ._last_run import LastRun, create_run_predicate, LastRunState
+from ._example_commands import hello, exit_code, raise_exception
+from ._last_run import LastRun, create_run_predicate
+from ._last_run_history import LastRunHistory
 from ._logging_util import (
     attach_extra_callbacks_to_log_formatter,
     LogRedactor,
@@ -14,15 +15,19 @@ from ._rate_limiter import (
 from ._schedule import schedule, repeat
 from ._schedule_cli import schedule_cli
 from ._send_errors_to_slack import send_errors_to_slack, error_to_slack
+from ._types import Outcome
 
 __all__ = [
     "attach_extra_callbacks_to_log_formatter",
     "create_run_predicate",
     "error_to_slack",
+    "exit_code",
     "hello",
     "LastRun",
-    "LastRunState",
+    "LastRunHistory",
     "LogRedactor",
+    "Outcome",
+    "raise_exception",
     "RateLimiter",
     "RateLimiterProtocol",
     "repeat",
