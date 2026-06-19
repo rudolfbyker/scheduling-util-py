@@ -303,6 +303,207 @@ Traceback:""" + ComparablePattern(re.compile(r".*")),
         self.assertNotIn("Posting error to Slack.", messages)
         self.assertNotIn("RuntimeError: boom", messages)
 
+    def test_none_result_without_healthcheck_is_success_for_backward_compatibility(
+        self,
+    ) -> None:
+        n = 0
+
+        def return_none() -> None:
+            nonlocal n
+            n += 1
+            return None
+
+        with (
+            TemporaryDirectory() as tmp_dir_str,
+            self.assertLogs(level=DEBUG) as logs,
+        ):
+            tmp_dir = Path(tmp_dir_str)
+            last_run_dir = tmp_dir / "last-run"
+
+            schedule(
+                interval=timedelta(milliseconds=1),
+                max_runs=2,
+                heartbeat_path=None,
+                name="test",
+                description=None,
+                last_run_dir=last_run_dir,
+                last_run_reset=False,
+                success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
+                failure_period=timedelta(0),
+                max_failures=3,
+                on_max_failures="stall",
+                func=return_none,
+                slack_webhook=None,
+                slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
+            )
+
+            state = json.loads((last_run_dir / "test.json").read_bytes())
+
+        self.assertEqual(1, n)
+        self.assertEqual(
+            [
+                {"at": AnyFloat(), "kind": "started"},
+                {
+                    "at": AnyFloat(),
+                    "details": "",
+                    "kind": "finished",
+                    "outcome": "success",
+                },
+            ],
+            state,
+        )
+
+        messages = [r.message for r in logs.records]
+        self.assertNotIn("Unexpected result from `test`: `None`", messages)
+        self.assertNotIn(
+            f"Sending failure ping for health check with slug=test and uuid={health_check_uuid}.",
+            messages,
+        )
+
+    def test_unexpected_non_none_result_without_healthcheck_is_failure_and_retries(
+        self,
+    ) -> None:
+        n = 0
+
+        def return_unknown() -> Any:
+            nonlocal n
+            n += 1
+            return "unknown"
+
+        with (
+            TemporaryDirectory() as tmp_dir_str,
+            self.assertLogs(level=DEBUG) as logs,
+        ):
+            tmp_dir = Path(tmp_dir_str)
+            last_run_dir = tmp_dir / "last-run"
+
+            schedule(
+                interval=timedelta(milliseconds=1),
+                max_runs=2,
+                heartbeat_path=None,
+                name="test",
+                description=None,
+                last_run_dir=last_run_dir,
+                last_run_reset=False,
+                success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
+                failure_period=timedelta(0),
+                max_failures=3,
+                on_max_failures="stall",
+                func=return_unknown,
+                slack_webhook=None,
+                slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
+            )
+
+            state = json.loads((last_run_dir / "test.json").read_bytes())
+
+        self.assertEqual(2, n)
+        self.assertEqual(
+            [
+                {"at": AnyFloat(), "kind": "started"},
+                {
+                    "at": AnyFloat(),
+                    "details": "Unexpected result from `test`: `unknown`",
+                    "kind": "finished",
+                    "outcome": "failure",
+                },
+                {"at": AnyFloat(), "kind": "started"},
+                {
+                    "at": AnyFloat(),
+                    "details": "Unexpected result from `test`: `unknown`",
+                    "kind": "finished",
+                    "outcome": "failure",
+                },
+            ],
+            state,
+        )
+
+        messages = [r.message for r in logs.records]
+        self.assertEqual(
+            2,
+            messages.count("Unexpected result from `test`: `unknown`"),
+        )
+        self.assertNotIn(
+            f"Sending failure ping for health check with slug=test and uuid={health_check_uuid}.",
+            messages,
+        )
+
+    def test_unexpected_non_none_result_notifies_healthchecks_as_failure(self) -> None:
+        n = 0
+
+        def return_unknown() -> Any:
+            nonlocal n
+            n += 1
+            return "unknown"
+
+        with (
+            TemporaryDirectory() as tmp_dir_str,
+            self.assertLogs(level=DEBUG) as logs,
+            requests_mock.Mocker() as m,
+        ):
+            tmp_dir = Path(tmp_dir_str)
+            last_run_dir = tmp_dir / "last-run"
+
+            self._mock_healthchecks(m)
+
+            schedule(
+                hc_ping_key="ping-key",
+                hc_manage_key="manage-key",
+                hc_timeout=timedelta(days=1),
+                hc_grace=timedelta(days=2),
+                interval=timedelta(milliseconds=1),
+                max_runs=1,
+                heartbeat_path=None,
+                name="test",
+                description="Test schedule",
+                last_run_dir=last_run_dir,
+                last_run_reset=False,
+                success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
+                failure_period=timedelta(hours=1),
+                max_failures=3,
+                on_max_failures="stall",
+                func=return_unknown,
+                slack_webhook=None,
+                slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
+            )
+
+            state = json.loads((last_run_dir / "test.json").read_bytes())
+            requested_urls = [request.url for request in m.request_history]
+
+        self.assertEqual(1, n)
+        self.assertEqual(
+            [
+                {"at": AnyFloat(), "kind": "started"},
+                {
+                    "at": AnyFloat(),
+                    "details": "Unexpected result from `test`: `unknown`",
+                    "kind": "finished",
+                    "outcome": "failure",
+                },
+            ],
+            state,
+        )
+
+        self.assertEqual(
+            [
+                "https://healthchecks.io/api/v3/checks/",
+                "https://hc-ping.com/00000000-0000-0000-0000-000000000001/start?rid="
+                + any_uuid,
+                "https://hc-ping.com/00000000-0000-0000-0000-000000000001/fail?rid="
+                + any_uuid,
+            ],
+            requested_urls,
+        )
+
+        messages = [r.message for r in logs.records]
+        self.assertIn("Unexpected result from `test`: `unknown`", messages)
+        self.assertIn(
+            f"Sending failure ping for health check with slug=test and uuid={health_check_uuid}.",
+            messages,
+        )
+
     def test_stall_after_max_failures(self) -> None:
 
         n = 0

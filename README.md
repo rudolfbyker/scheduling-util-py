@@ -61,6 +61,11 @@ Scheduled functions have four possible outcomes:
 | Return `"failure"` | Send a failure ping. | Do nothing.                          | `--failure-period`        |
 | Raise an exception | Send a failure ping. | Send message with exception details. | `--failure-period`        |
 
+Notes:
+- Returning `None` is treated like `"success"` for backward compatibility.
+- New scheduled functions should return `"success"` explicitly.
+- Returning any other value is treated like `"failure"`.
+
 These outcomes are used internally by the [scheduler CLI](#use-the-scheduler-cli), too.
 
 For type annotations, import `Outcome` from the package root:

@@ -38,7 +38,7 @@ def schedule(
     max_failures: int,
     on_max_failures: Literal["ignore", "stall", "success_schedule"],
     max_history_entries: int = 1000,
-    func: Callable[[], Outcome],
+    func: Callable[[], Outcome | None],
     slack_webhook: str | None = None,
     slack_rate_limiter: RateLimiter,
 ) -> None:
@@ -148,21 +148,32 @@ def schedule(
         last_run_path.unlink(missing_ok=True)
     last_run = LastRun(path=last_run_path, max_history_entries=max_history_entries)
 
-    def hc_func() -> Outcome:
+    def assess_return_value(returned: Any) -> Tuple[Outcome, str]:
+        if returned is None or returned == "success":
+            return "success", ""
+
+        if returned == "failure":
+            return "failure", ""
+
+        if returned == "neutral":
+            return "neutral", ""
+
+        return "failure", f"Unexpected result from `{name}`: `{returned}`"
+
+    def hc_func() -> Any:
         with check or nullcontext():
-            result: Outcome = func()
+            result: Any = func()
             logger.info("Result for `%s` is `%s`.", name, result)
+            outcome, details = assess_return_value(result)
+
+            if details:
+                logger.error(details)
+
             if check:
-                if result == "success":
+                if outcome == "success":
                     check.ping_success()
-                elif result == "failure":
+                elif outcome == "failure":
                     check.ping_failure()
-                elif result == "neutral":
-                    # Don't ping.
-                    pass
-                else:
-                    logger.error("Unexpected result from `%s`: `%s`", name, result)
-                    result = "failure"
 
         return result
 
@@ -171,17 +182,10 @@ def schedule(
         returned: Any,
         raised: BaseException | None,
     ) -> Tuple[Outcome, str]:
-        outcome: Outcome
-        if raised:
+        if raised is not None:
             return "failure", f"Raised `{type(raised).__name__}`: {raised}"
 
-        if returned == "failure":
-            return "failure", ""
-
-        if returned == "neutral":
-            return "neutral", ""
-
-        return "success", ""
+        return assess_return_value(returned)
 
     wrapped_function = last_run.wrap(
         f=hc_func,
