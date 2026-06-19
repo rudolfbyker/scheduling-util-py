@@ -288,6 +288,49 @@ sys.exit(16)
                 expected_stdout=[],
             )
 
+    def test_exit_code_success_and_neutral_must_not_overlap(self) -> None:
+        cases = [
+            [
+                "py-exec",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                "--code=pass",
+            ],
+            [
+                "click-invoke",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                "--command=scheduling_util:hello",
+            ],
+            [
+                "subprocess",
+                "--exit-codes-success=16",
+                "--exit-codes-neutral=16",
+                sys.executable,
+                "-c",
+                "pass",
+            ],
+        ]
+
+        for args in cases:
+            with self.subTest(command=args[0]):
+                with TemporaryDirectory() as tmp_dir_str:
+                    result = CliRunner().invoke(
+                        schedule_cli,
+                        [
+                            "--max-runs=1",
+                            "--cache-dir",
+                            tmp_dir_str,
+                            *args,
+                        ],
+                    )
+
+                self.assertEqual(2, result.exit_code, result.output)
+                self.assertIn(
+                    "Exit codes cannot be both successful and neutral: 16.",
+                    result.output,
+                )
+
     def test_click_invoke(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)

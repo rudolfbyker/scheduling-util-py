@@ -36,6 +36,17 @@ from ._types import Outcome
 logger = getLogger(__name__)
 
 
+def validate_exit_code_sets(
+    *,
+    exit_codes_success: OrderedSet[int],
+    exit_codes_neutral: OrderedSet[int],
+) -> None:
+    overlap = [code for code in exit_codes_success if code in exit_codes_neutral]
+    if overlap:
+        codes = ", ".join(str(code) for code in overlap)
+        raise UsageError(f"Exit codes cannot be both successful and neutral: {codes}.")
+
+
 @click.group()
 @click_option__log_level
 @click_option__hc_ping_key
@@ -191,6 +202,11 @@ def click_invoke(
     Schedule another Click command.
     Run it in the same process using `click.Context.invoke`.
     """
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
+
     if ":" not in command_str:
         raise ValueError(
             f"Command string must be in format 'module.path:function_name', got: {command_str}"
@@ -253,6 +269,11 @@ def py_exec(
 
     The code will run in the same process as this script.
     """
+
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
 
     def func() -> Outcome:
         # noinspection PyBroadException
@@ -319,6 +340,11 @@ def subprocess(
 
     ARGS: The arguments to pass to the subprocess.
     """
+    validate_exit_code_sets(
+        exit_codes_success=exit_codes_success,
+        exit_codes_neutral=exit_codes_neutral,
+    )
+
     if check is None:
         check = exit_codes_success == {0} and not exit_codes_neutral
 
