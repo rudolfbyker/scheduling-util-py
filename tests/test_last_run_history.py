@@ -196,31 +196,6 @@ class TestLastRunHistory(unittest.TestCase):
         self.assertIn("Ignoring invalid history file", joined_log_messages)
         self.assertIn("expected a list", joined_log_messages)
 
-    def test_old_summary_state_logs_and_starts_clean(self) -> None:
-        with TemporaryDirectory() as tmp_dir_str:
-            path = Path(tmp_dir_str) / "last-run.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "last_attempted": "not a datetime",
-                        "last_successful": "2025-01-01T10:00:00",
-                        "last_failed": "2025-01-01T12:00:00",
-                        "n_consecutive_failures": "not an int",
-                        "last_failure": "boom",
-                    }
-                )
-            )
-
-            with self.assertLogs(LOGGER_NAME, level="ERROR") as logs:
-                history = LastRunHistory(path=path)
-                entries = history.entries
-
-        self.assertEqual([], entries)
-        log_messages = [r.message for r in logs.records]
-        joined_log_messages = "\n".join(log_messages)
-        self.assertIn("Ignoring invalid history file", joined_log_messages)
-        self.assertIn("expected a list", joined_log_messages)
-
     @unittest.skipUnless(os.name == "posix", "Linux-only fcntl locking")
     def test_concurrent_processes_preserve_all_appended_entries(self) -> None:
         ctx: Any = get_context("fork")
