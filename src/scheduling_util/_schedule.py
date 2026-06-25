@@ -64,7 +64,8 @@ def schedule(
         heartbeat_path: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
         name:
             A short name describing the task.
-            Used as the slug for `healthchecks.io` and as the file name of the LastRun state.
+            Used as the slug for `healthchecks.io`, as the Healthchecks display name when
+            `hc_manage_key` is provided, and as the file name of the LastRun state.
             To ping a health check, we need (the UUID) || (the slug && the ping key).
         description: A description for the health check. Used for `healthchecks.io` and in Slack messages.
         last_run_dir: The directory in which to store the `LastRun` state files.
@@ -121,6 +122,7 @@ def schedule(
     check: HealthCheck | None = (
         hc.check(
             run_id=uuid4(),
+            name=name if hc_manage_key else None,
             slug=name,
             uuid=hc_uuid,
             desc=description,

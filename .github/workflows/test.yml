@@ -34,6 +34,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        env:
+          PIP_EXTRA_INDEX_URL: "https://aa:${{ secrets.AA_PYPI_PASSWORD }}@pypi.autoactuary.com/simple https://rsc:${{ secrets.RSC_PYPI_PASSWORD }}@pypi.refstudycentre.com/simple"
         run: |
           python -m pip install -c ci-constraints.txt -r test-requirements.txt .
         timeout-minutes: 10

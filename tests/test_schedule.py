@@ -79,7 +79,27 @@ class TestScheduleFunction(unittest.TestCase):
                 slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
             )
 
+            create_request = next(
+                r
+                for r in m.request_history
+                if r.method == "POST"
+                and r.url == "https://healthchecks.io/api/v3/checks/"
+            )
+
         self.assertEqual(n, 1)
+        self.assertEqual("POST", create_request.method)
+        self.assertEqual("https://healthchecks.io/api/v3/checks/", create_request.url)
+        self.assertEqual(
+            {
+                "name": "test",
+                "slug": "test",
+                "desc": "Test schedule",
+                "timeout": 86400,
+                "grace": 172800,
+                "unique": ["slug"],
+            },
+            create_request.json(),
+        )
         self.assertEqual(
             [
                 "POST https://healthchecks.io/api/v3/checks/ 200",
@@ -108,6 +128,56 @@ class TestScheduleFunction(unittest.TestCase):
                 "Done.",
             ],
             [r.message for r in logs.records],
+        )
+
+    def test_ping_key_without_manage_key_autoprovisions_by_slug(self) -> None:
+        n = 0
+
+        def count() -> Literal["success"]:
+            nonlocal n
+            n += 1
+            return "success"
+
+        with (
+            TemporaryDirectory() as tmp_dir_str,
+            requests_mock.Mocker() as m,
+        ):
+            tmp_dir = Path(tmp_dir_str)
+            m.register_uri(
+                method=requests_mock.ANY,
+                url=requests_mock.ANY,
+                status_code=200,
+                text="OK",
+            )
+
+            schedule(
+                hc_ping_key="ping-key",
+                interval=timedelta(milliseconds=1),
+                max_runs=1,
+                heartbeat_path=None,
+                name="test",
+                description=None,
+                last_run_dir=tmp_dir / "last-run",
+                last_run_reset=False,
+                success_period=timedelta(days=1),
+                neutral_period=timedelta(hours=2),
+                failure_period=timedelta(hours=1),
+                max_failures=3,
+                on_max_failures="stall",
+                func=count,
+                slack_webhook=None,
+                slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
+            )
+
+            requested_urls = [request.url for request in m.request_history]
+
+        self.assertEqual(n, 1)
+        self.assertEqual(
+            [
+                "https://hc-ping.com/ping-key/test/start?create=1&rid=" + any_uuid,
+                "https://hc-ping.com/ping-key/test?create=1&rid=" + any_uuid,
+            ],
+            requested_urls,
         )
 
     def test_retry_after_failure_period_elapsed(self) -> None:

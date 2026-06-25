@@ -73,7 +73,8 @@ def validate_exit_code_sets(
     "--name",
     required=False,
     help="A short name describing the task. "
-    "Used as the slug for `healthchecks.io` and as the file name of the LastRun state.",
+    "Used as the slug for `healthchecks.io`, as the Healthchecks display name when "
+    "`--hc-manage-key` is provided, and as the file name of the LastRun state.",
 )
 @click.option(
     "--description",
