@@ -23,9 +23,9 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: MIT",
     "Operating System :: OS Independent",
 ]
+license = "MIT"
 requires-python = ">=3.12"
 
 [project.urls]
