@@ -95,6 +95,7 @@ def run_backup() -> Outcome:
 - The scheduler stores last-run state under `--cache-dir`.
 - Use `--reset` when you want to ignore the cached state for a local test run.
 - Add `--hc-*` options if you want the scheduler to contact `healthchecks.io`.
+- When `--hc-manage-key` is provided, `--name` is also sent as the Healthchecks display name.
 - The `--*-period` options control how long to wait after each outcome before running again.
 - Use `--exit-codes-*` options if you need something other than the default exit code handling, 
   where `0` maps to "success" and everything else maps to "failure".
