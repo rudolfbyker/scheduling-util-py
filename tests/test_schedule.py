@@ -79,7 +79,12 @@ class TestScheduleFunction(unittest.TestCase):
                 slack_rate_limiter=self._slack_rate_limiter(tmp_dir),
             )
 
-            create_request = next(r for r in m.request_history if r.method == "POST" and r.url == "https://healthchecks.io/api/v3/checks/")
+            create_request = next(
+                r
+                for r in m.request_history
+                if r.method == "POST"
+                and r.url == "https://healthchecks.io/api/v3/checks/"
+            )
 
         self.assertEqual(n, 1)
         self.assertEqual("POST", create_request.method)
