@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 from time import sleep
 from typing import Optional, Union
 
-from scheduling_util import LastRun, create_run_predicate, LastRunHistory
+from scheduling_util import LastRun, RunPredicate, LastRunHistory
 from scheduling_util._last_run_history import LastRunAttemptFinished
 
 
@@ -94,7 +94,7 @@ class TestLastRun(unittest.TestCase):
 
             run_debounced = last.wrap(
                 f=run,
-                should_run=create_run_predicate(
+                should_run=RunPredicate(
                     success_period=timedelta(seconds=0.1),
                     neutral_period=timedelta(seconds=1),
                     failure_period=timedelta(seconds=10),
@@ -242,9 +242,93 @@ class TestLastRun(unittest.TestCase):
         )
 
 
-class TestCreateRunPredicate(unittest.TestCase):
+class TestRunPredicate(unittest.TestCase):
+    def test_force_next_return_value__forces_true_once(self) -> None:
+        p = RunPredicate(
+            success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
+            failure_period=timedelta(hours=1),
+            max_failures=3,
+            on_max_failures="success_schedule",
+        )
+
+        t = datetime(2025, 1, 1, 12, 0, 0)
+        success_5_min_ago = LastRunHistory(
+            entries=[
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=5)).timestamp(),
+                    outcome="success",
+                )
+            ]
+        )
+
+        self.assertFalse(p(now=t, history=success_5_min_ago))
+
+        p.force_next_return_value(True)
+        self.assertTrue(p(now=t, history=success_5_min_ago))
+        self.assertFalse(p(now=t, history=success_5_min_ago))
+
+    def test_force_next_return_value__forces_false_once(self) -> None:
+        p = RunPredicate(
+            success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
+            failure_period=timedelta(hours=1),
+            max_failures=3,
+            on_max_failures="success_schedule",
+        )
+
+        t = datetime(2025, 1, 1, 12, 0, 0)
+        empty_history = LastRunHistory()
+
+        self.assertTrue(p(now=t, history=empty_history))
+
+        p.force_next_return_value(False)
+        self.assertFalse(p(now=t, history=empty_history))
+        self.assertTrue(p(now=t, history=empty_history))
+
+    def test_unset_next_return_value__clears_pending_forced_value(self) -> None:
+        p = RunPredicate(
+            success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
+            failure_period=timedelta(hours=1),
+            max_failures=3,
+            on_max_failures="success_schedule",
+        )
+
+        t = datetime(2025, 1, 1, 12, 0, 0)
+        success_5_min_ago = LastRunHistory(
+            entries=[
+                LastRunAttemptFinished(
+                    at=(t - timedelta(minutes=5)).timestamp(),
+                    outcome="success",
+                )
+            ]
+        )
+
+        p.force_next_return_value(True)
+        p.unset_next_return_value()
+
+        self.assertFalse(p(now=t, history=success_5_min_ago))
+
+    def test_force_next_return_value__overwrites_pending_forced_value(self) -> None:
+        p = RunPredicate(
+            success_period=timedelta(days=1),
+            neutral_period=timedelta(hours=2),
+            failure_period=timedelta(hours=1),
+            max_failures=3,
+            on_max_failures="success_schedule",
+        )
+
+        t = datetime(2025, 1, 1, 12, 0, 0)
+        empty_history = LastRunHistory()
+
+        p.force_next_return_value(False)
+        p.force_next_return_value(True)
+
+        self.assertTrue(p(now=t, history=empty_history))
+
     def test_on_max_failures__success_schedule(self) -> None:
-        p = create_run_predicate(
+        p = RunPredicate(
             success_period=timedelta(days=1),
             neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
@@ -341,7 +425,7 @@ class TestCreateRunPredicate(unittest.TestCase):
                 self.assertFalse(p(now=t, history=too_many_failures_no_success))
 
     def test_on_max_failures__stall(self) -> None:
-        p = create_run_predicate(
+        p = RunPredicate(
             success_period=timedelta(days=1),
             neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
@@ -380,7 +464,7 @@ class TestCreateRunPredicate(unittest.TestCase):
             self.assertFalse(p(now=t + timedelta(days=100), history=too_many_failures))
 
     def test_on_max_failures__ignore(self) -> None:
-        p = create_run_predicate(
+        p = RunPredicate(
             success_period=timedelta(days=1),
             neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),
@@ -417,7 +501,7 @@ class TestCreateRunPredicate(unittest.TestCase):
         self.assertTrue(p(now=t + timedelta(hours=2), history=too_many_failures))
 
     def test_on_max_failures__invalid(self) -> None:
-        p = create_run_predicate(
+        p = RunPredicate(
             success_period=timedelta(days=1),
             neutral_period=timedelta(hours=2),
             failure_period=timedelta(hours=1),

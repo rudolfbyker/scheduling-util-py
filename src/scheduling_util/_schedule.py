@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from hcio_client import HealthChecks, HealthCheck
 
-from ._last_run import create_run_predicate, LastRun
+from ._last_run import LastRun, RunPredicate
 from ._rate_limiter import RateLimiter
 from ._send_errors_to_slack import send_errors_to_slack
 from ._types import Outcome
@@ -135,7 +135,7 @@ def schedule(
         else None
     )
 
-    should_run = create_run_predicate(
+    should_run = RunPredicate(
         success_period=success_period,
         neutral_period=neutral_period,
         failure_period=failure_period,
