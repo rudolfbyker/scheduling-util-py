@@ -94,11 +94,63 @@ def run_backup() -> Outcome:
 
 - The scheduler stores last-run state under `--cache-dir`.
 - Use `--reset` when you want to ignore the cached state for a local test run.
+- Use `--ipc-socket` to opt into local scheduler control via a Unix socket.
 - Add `--hc-*` options if you want the scheduler to contact `healthchecks.io`.
 - When `--hc-manage-key` is provided, `--name` is also sent as the Healthchecks display name.
 - The `--*-period` options control how long to wait after each outcome before running again.
 - Use `--exit-codes-*` options if you need something other than the default exit code handling, 
   where `0` maps to "success" and everything else maps to "failure".
+
+### Control a running scheduler
+
+Controlling the scheduler via a Unix socket is disabled by default.
+To enable it, start the scheduler with `--ipc-socket ...`:
+
+```shell
+schedule \
+  --name backup-job \
+  --interval 1h \
+  --success-period 1d \
+  --cache-dir ./.cache/scheduling-util \
+  --ipc-socket ./backup-job.sock \
+  subprocess \
+  rsync -a ./source/ ./backup/
+```
+
+Then send commands with `schedule control`:
+
+```shell
+schedule control --socket ./backup-job.sock status
+schedule control --socket ./backup-job.sock wake
+schedule control --socket ./backup-job.sock run-now
+schedule control --socket ./backup-job.sock quit
+```
+
+Commands:
+
+| Command   | Behavior                                                                                                      |
+|-----------|---------------------------------------------------------------------------------------------------------------|
+| `status`  | Return scheduler state and pending control flags.                                                             |
+| `wake`    | Wake the outer loop and check the normal schedule now. The job may still be skipped if it is not due.         |
+| `run-now` | Run the job now, bypassing the schedule predicate. If a job is already running, this returns a busy response. |
+| `quit`    | Gracefully stop the scheduler after the current job finishes.                                                 |
+
+The raw controller protocol is one newline-terminated JSON request and one newline-terminated JSON response per connection.
+All requests and responses include `"version": 1`.
+
+Example request:
+
+```json
+{"version":1,"command":"run-now"}
+```
+
+Example response:
+
+```json
+{"version":1,"ok":true,"status":"accepted","message":"Run requested.","scheduler":{"state":"sleeping","pending_wake":false,"pending_run_now":true,"quit_requested":false,"run_count":1}}
+```
+
+Stopping an already-running job and modifying schedules are not part of the v1 controller API.
 
 ### Run Python code from the scheduler CLI
 

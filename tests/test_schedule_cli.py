@@ -110,6 +110,31 @@ class TestScheduleCli(unittest.TestCase):
         self.assertEqual(schedule_kwargs["hc_timeout"].total_seconds(), 300)
         self.assertEqual(schedule_kwargs["hc_grace"].total_seconds(), 600)
 
+    def test_ipc_socket__forwarded_to_schedule(self) -> None:
+        with TemporaryDirectory() as tmp_dir_str:
+            tmp_dir = Path(tmp_dir_str)
+            socket_path = tmp_dir / "scheduler.sock"
+
+            with patch("scheduling_util._schedule_cli.schedule") as schedule_mock:
+                result = CliRunner().invoke(
+                    schedule_cli,
+                    [
+                        "--ipc-socket",
+                        str(socket_path),
+                        "--max-runs=1",
+                        "--cache-dir",
+                        tmp_dir_str,
+                        "py-exec",
+                        "--code",
+                        "pass",
+                    ],
+                )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        schedule_mock.assert_called_once()
+        schedule_kwargs = schedule_mock.call_args.kwargs
+        self.assertEqual(socket_path.resolve(), schedule_kwargs["ipc_socket_path"])
+
     def test_py_exec(self) -> None:
         with TemporaryDirectory() as tmp_dir_str:
             tmp_dir = Path(tmp_dir_str)

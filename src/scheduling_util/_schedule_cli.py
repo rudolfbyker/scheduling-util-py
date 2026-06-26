@@ -28,6 +28,14 @@ from ._click_options import (
     click_option__exit_codes_success,
     click_option__exit_codes_neutral,
 )
+from ._controller import (
+    PROTOCOL_VERSION,
+    QuitRequest,
+    RunNowRequest,
+    StatusRequest,
+    WakeRequest,
+)
+from ._controller_socket import send_controller_socket_request
 from ._logging_util import stream_logs_to_stderr
 from ._rate_limiter import RateLimiter
 from ._schedule import schedule
@@ -60,6 +68,17 @@ def validate_exit_code_sets(
     default="1m",
     show_default=True,
     help="Run this script continually, waiting this amount of time between runs.",
+)
+@click.option(
+    "--ipc-socket",
+    "ipc_socket_path",
+    type=click.Path(
+        dir_okay=False,
+        path_type=Path,
+        resolve_path=True,
+    ),
+    required=False,
+    help="Unix socket path on which to listen for scheduler control commands. Required if you want to use `schedule control`.",
 )
 @click.option(
     "--max-runs",
@@ -380,6 +399,102 @@ def subprocess(
     return func
 
 
+@schedule_cli.group()
+@click.option(
+    "--socket",
+    "socket_path",
+    required=True,
+    type=click.Path(
+        dir_okay=False,
+        path_type=Path,
+        resolve_path=True,
+    ),
+    help="Unix socket path on which to send scheduler control commands.",
+)
+@click.pass_context
+def control(ctx: click.Context, *, socket_path: Path) -> None:
+    """
+    Send control commands to a running scheduler.
+    """
+    ctx.obj = {"socket_path": socket_path}
+
+
+@control.command("status")
+@click.pass_context
+def control_status(ctx: click.Context) -> None:
+    """
+    Print the scheduler's current controller status as JSON.
+    """
+
+    send_control_request(
+        ctx=ctx,
+        request=StatusRequest(version=PROTOCOL_VERSION, command="status"),
+    )
+
+
+@control.command("wake")
+@click.pass_context
+def control_wake(ctx: click.Context) -> None:
+    """
+    Wake the scheduler so it checks the normal schedule immediately.
+    """
+
+    send_control_request(
+        ctx=ctx,
+        request=WakeRequest(version=PROTOCOL_VERSION, command="wake"),
+    )
+
+
+@control.command("run-now")
+@click.pass_context
+def control_run_now(ctx: click.Context) -> None:
+    """
+    Request one forced scheduler run.
+    """
+
+    send_control_request(
+        ctx=ctx,
+        request=RunNowRequest(version=PROTOCOL_VERSION, command="run-now"),
+    )
+
+
+@control.command("quit")
+@click.pass_context
+def control_quit(ctx: click.Context) -> None:
+    """
+    Request graceful scheduler shutdown.
+    """
+
+    send_control_request(
+        ctx=ctx,
+        request=QuitRequest(version=PROTOCOL_VERSION, command="quit"),
+    )
+
+
+def send_control_request(
+    *,
+    ctx: click.Context,
+    request: StatusRequest | WakeRequest | RunNowRequest | QuitRequest,
+) -> None:
+    """
+    Send a prepared request over the configured socket and print the response.
+    """
+
+    socket_path = ctx.obj["socket_path"]
+
+    try:
+        response = send_controller_socket_request(
+            socket_path=socket_path,
+            request=request,
+        )
+    except Exception as e:
+        raise click.ClickException(f"{type(e).__name__}: {e}") from e
+
+    click.echo(response.model_dump_json(indent=2))
+    if not response.ok:
+        ctx.exit(2)
+
+
 def args_for_subprocess_run(
     *, shell: bool, args: Tuple[str, ...]
 ) -> str | Tuple[str, ...]:
@@ -397,7 +512,7 @@ def args_for_subprocess_run(
 
 @schedule_cli.result_callback()
 def schedule_cli__on_result(
-    func: Callable[[], Outcome],
+    func: Callable[[], Outcome] | None,
     *,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
@@ -405,6 +520,7 @@ def schedule_cli__on_result(
     hc_timeout: Duration | None,
     hc_grace: Duration | None,
     interval: Duration,
+    ipc_socket_path: Path | None,
     max_runs: int | None,
     heartbeat_path: Path | None,
     name: str | None,
@@ -420,6 +536,9 @@ def schedule_cli__on_result(
     reset: bool,
     **_kwargs: Any,
 ) -> None:
+    if func is None:
+        return
+
     schedule(
         hc_ping_key=hc_ping_key,
         hc_manage_key=hc_manage_key,
@@ -427,6 +546,7 @@ def schedule_cli__on_result(
         hc_timeout=hc_timeout,
         hc_grace=hc_grace,
         interval=interval,
+        ipc_socket_path=ipc_socket_path,
         max_runs=max_runs,
         heartbeat_path=heartbeat_path,
         name=name,
