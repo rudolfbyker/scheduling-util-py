@@ -10,9 +10,11 @@ from uuid import uuid4
 
 from hcio_client import HealthChecks, HealthCheck
 
-from ._last_run import create_run_predicate, LastRun
+from ._last_run import LastRun, RunPredicate
 from ._rate_limiter import RateLimiter
 from ._send_errors_to_slack import send_errors_to_slack
+from ._controller import ScheduleController
+from ._controller_socket import ScheduleControllerSocketServer
 from ._types import Outcome
 
 logger = getLogger(__name__)
@@ -26,6 +28,7 @@ def schedule(
     hc_grace: timedelta | None = None,
     hc_uuid: str | None = None,
     interval: timedelta,
+    ipc_socket_path: Path | None = None,
     max_runs: int | None = None,
     heartbeat_path: Path | None = None,
     name: str | None = None,
@@ -60,6 +63,7 @@ def schedule(
             The UUID of the health check.
             To ping a health check, we need (the UUID) || (the slug && the ping key).
         interval: The amount of time to wait between runs.
+        ipc_socket_path: If provided, listen on this Unix socket path for control commands.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
         heartbeat_path: If provided, this file will be touched at the start of each iteration to act as a heartbeat.
         name:
@@ -135,7 +139,7 @@ def schedule(
         else None
     )
 
-    should_run = create_run_predicate(
+    should_run = RunPredicate(
         success_period=success_period,
         neutral_period=neutral_period,
         failure_period=failure_period,
@@ -209,11 +213,48 @@ def schedule(
         ):
             wrapped_function()
 
-    repeat(
-        func=attempt,
-        max_runs=max_runs,
-        sleep_duration=interval,
+    n_runs = 0
+    controller = ScheduleController()
+    control_server = (
+        ScheduleControllerSocketServer(path=ipc_socket_path, controller=controller)
+        if ipc_socket_path is not None
+        else nullcontext()
     )
+
+    def should_stop_loop() -> bool:
+        return controller.quit_requested() or (
+            max_runs is not None and n_runs >= max_runs
+        )
+
+    with control_server:
+        try:
+            while not should_stop_loop():
+                mode = controller.take_next_run_mode()
+
+                try:
+                    controller.mark_running()
+                    if mode == "run-now":
+                        should_run.force_next_return_value(value=True)
+                    attempt()
+                    n_runs += 1
+                    controller.update_run_count(n_runs)
+                except KeyboardInterrupt:
+                    logger.info("Received KeyboardInterrupt, stopping …")
+                    break
+
+                if should_stop_loop():
+                    break
+
+                if (
+                    interval is not None
+                    and interval.total_seconds() > 0
+                    and not controller.has_pending_work()
+                ):
+                    logger.debug(f"Sleeping for {interval} …")
+                    controller.wait_for_work(interval.total_seconds())
+
+        finally:
+            controller.mark_stopped()
 
     logger.info("Done.")
 

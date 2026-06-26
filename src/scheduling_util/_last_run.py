@@ -52,6 +52,7 @@ class AssessResultCallable(Protocol):
     ) -> Tuple[Outcome, str]: ...
 
 
+# noinspection PyUnusedLocal
 def default_assess_result(
     *,
     returned: R | None,
@@ -189,6 +190,17 @@ class LastRun:
         return wrap_result
 
 
+class _Unset:
+    """
+    Sentinel type for the absence of a forced predicate return value.
+    """
+
+    pass
+
+
+_UNSET = _Unset()
+
+
 def create_run_predicate(
     *,
     success_period: timedelta,
@@ -199,44 +211,118 @@ def create_run_predicate(
     check: HealthCheck | None = None,
 ) -> ShouldRunCallable:
     """
-    Create a predicate function for `LastRun.wrap`.
+    Factory function for backward compatibility.
+    """
+    return RunPredicate(
+        success_period=success_period,
+        neutral_period=neutral_period,
+        failure_period=failure_period,
+        max_failures=max_failures,
+        on_max_failures=on_max_failures,
+        check=check,
+    )
 
-    Args:
-        success_period:
-            The minimum time to wait after a successful run.
-            E.g., if you typically want a job to run every 5 days, set this to 5 days.
-        neutral_period:
-            The minimum time to wait after a neutral (i.e., neither successful nor failed) run.
-            E.g., a script might know that it has to wait for a specific thing to happen before it can succeed.
-            This time might be longer or shorter than either `success_period` or `failure_period`.
-        failure_period:
-            The minimum time to wait after a failed run.
-            E.g., if you want to retry a failed job sooner, instead of waiting for the next schedule,
-            make this smaller than `success_period`.
-        max_failures:
-            The maximum number of failures (since the last success) before taking an action based on `on_max_failures`.
-        on_max_failures:
-            What to do if the job failed more than `max_failures` times (since the last success):
 
-                - "ignore": Keep retrying indefinitely. `max_failures` is ignored.
-                - "stall": Human intervention is required before the job will run again.
-                - "success_period": Run again `success_period` after the last successful run, if there is one.
-                  This is only useful if `success_period` is larger than `failure_period`.
-        check:
-            A `HealthCheck` instance to use for reporting failures.
-            If `None`, no health check reporting will be done.
+class RunPredicate:
+    """
+    Decide whether a job may run based on last-run history and failure policy.
     """
 
-    def report_error(message: str) -> None:
-        logger.error(message)
-        if check is not None:
-            check.ping_log(data=message)
-            check.ping_failure()
+    def __init__(
+        self,
+        *,
+        success_period: timedelta,
+        neutral_period: timedelta,
+        failure_period: timedelta,
+        max_failures: int,
+        on_max_failures: Literal["ignore", "stall", "success_schedule"],
+        check: HealthCheck | None = None,
+    ) -> None:
+        """
+        Create a predicate function for `LastRun.wrap`.
 
-    def predicate(*, now: datetime, history: LastRunHistory) -> bool:
+        Args:
+            success_period:
+                The minimum time to wait after a successful run.
+                E.g., if you typically want a job to run every 5 days, set this to 5 days.
+            neutral_period:
+                The minimum time to wait after a neutral (i.e., neither successful nor failed) run.
+                E.g., a script might know that it has to wait for a specific thing to happen before it can succeed.
+                This time might be longer or shorter than either `success_period` or `failure_period`.
+            failure_period:
+                The minimum time to wait after a failed run.
+                E.g., if you want to retry a failed job sooner, instead of waiting for the next schedule,
+                make this smaller than `success_period`.
+            max_failures:
+                The maximum number of failures (since the last success) before taking an action based on `on_max_failures`.
+            on_max_failures:
+                What to do if the job failed more than `max_failures` times (since the last success):
+
+                    - `ignore`: Keep retrying indefinitely. `max_failures` is ignored.
+                    - `stall`: Human intervention is required before the job will run again.
+                    - `success_schedule`: Run again `success_period` after the last successful run, if there is one.
+                      This is only useful if `success_period` is larger than `failure_period`.
+            check:
+                A `HealthCheck` instance to use for reporting failures.
+                If `None`, no health check reporting will be done.
         """
-        Predicate function for `LastRun.wrap`.
+
+        self.success_period = success_period
+        self.neutral_period = neutral_period
+        self.failure_period = failure_period
+        self.max_failures = max_failures
+        self.on_max_failures = on_max_failures
+        self.check = check
+
+        self._next_return_value: bool | _Unset = _UNSET
+
+    def __call__(
+        self,
+        *,
+        now: datetime,
+        history: LastRunHistory,
+    ) -> bool:
         """
+        Return whether a job may run for the supplied history snapshot.
+        """
+
+        if self._next_return_value is not _UNSET:
+            result = self._next_return_value
+            self._next_return_value = _UNSET
+            assert isinstance(result, bool)
+            return result
+
+        return self._predicate(now=now, history=history)
+
+    def force_next_return_value(self, value: bool) -> None:
+        """
+        Force the next predicate call to return the supplied value once.
+        """
+
+        self._next_return_value = value
+
+    def unset_next_return_value(self) -> None:
+        """
+        Clear any pending forced predicate return value.
+        """
+
+        self._next_return_value = _UNSET
+
+    def _report_error(self, message: str) -> None:
+        """
+        Log and report a scheduling policy error to `healthchecks.io` if configured.
+        """
+
+        logger.error(message)
+        if self.check is not None:
+            self.check.ping_log(data=message)
+            self.check.ping_failure()
+
+    def _predicate(self, *, now: datetime, history: LastRunHistory) -> bool:
+        """
+        Evaluate the normal last-run-history scheduling policy.
+        """
+
         with history.lock():
             last_finished = history.last_finished
 
@@ -246,34 +332,32 @@ def create_run_predicate(
 
             if last_finished.outcome == "success":
                 # The previous attempt was successful. Follow the success schedule.
-                return now - last_finished.datetime > success_period
+                return now - last_finished.datetime > self.success_period
 
             if last_finished.outcome == "neutral":
                 # The previous attempt was neutral. Follow the neutral schedule.
-                return now - last_finished.datetime > neutral_period
+                return now - last_finished.datetime > self.neutral_period
 
             if (
-                history.n_failures_since_last_success < max_failures
-                or on_max_failures == "ignore"
+                history.n_failures_since_last_success < self.max_failures
+                or self.on_max_failures == "ignore"
             ):
                 # The previous attempt failed, but not too many times.
-                return now - last_finished.datetime > failure_period
+                return now - last_finished.datetime > self.failure_period
 
             # The job failed too many times.
             last_finished_json = last_finished.model_dump_json(indent=2)
             last_success = history.last_success
 
-            if on_max_failures == "stall" or last_success is None:
-                report_error(
-                    f"Job stalled after {max_failures} tries. The last failure was:\n{last_finished_json}"
+            if self.on_max_failures == "stall" or last_success is None:
+                self._report_error(
+                    f"Job stalled after {self.max_failures} tries. The last failure was:\n{last_finished_json}"
                 )
                 return False
 
-            if on_max_failures == "success_schedule":
+            if self.on_max_failures == "success_schedule":
                 # Run again `success_period` after the last successful run, if there is one.
-                return now - last_success.datetime > success_period
+                return now - last_success.datetime > self.success_period
 
-            report_error("Unexpected state.")
+            self._report_error("Unexpected state.")
             return False
-
-    return predicate
