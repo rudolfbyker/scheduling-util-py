@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/scheduling-util-py.iml" filepath="$PROJECT_DIR$/.idea/scheduling-util-py.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/scheduling_util.iml" filepath="$PROJECT_DIR$/.idea/scheduling_util.iml" />
     </modules>
   </component>
 </project>
