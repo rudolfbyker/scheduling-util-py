@@ -19,6 +19,8 @@ from ._click_options import (
     click_option__hc_ping_base_url,
     click_option__hc_manage_base_url,
     click_option__cache_dir,
+    click_option__hc_channel,
+    click_option__hc_tags,
     click_option__hc_ping_key,
     click_option__hc_manage_key,
     click_option__log_level,
@@ -66,6 +68,8 @@ def validate_exit_code_sets(
 @click_option__hc_uuid
 @click_option__hc_timeout
 @click_option__hc_grace
+@click_option__hc_channel
+@click_option__hc_tags
 @click.option(
     "--interval",
     type=ClickDuration(),
@@ -523,6 +527,8 @@ def schedule_cli__on_result(
     hc_ping_key: str | None,
     hc_manage_key: str | None,
     hc_uuid: str | None,
+    hc_channel: tuple[str, ...],
+    hc_tags: str | None,
     hc_timeout: Duration | None,
     hc_grace: Duration | None,
     interval: Duration,
@@ -545,7 +551,18 @@ def schedule_cli__on_result(
     if func is None:
         return
 
+    if (hc_channel or hc_tags is not None) and not hc_manage_key:
+        raise click.UsageError(
+            "--hc-manage-key is required with --hc-channel or --hc-tags."
+        )
+    if (hc_channel or hc_tags is not None) and not (hc_uuid or (hc_ping_key and name)):
+        raise click.UsageError(
+            "--hc-channel and --hc-tags require --hc-uuid or both --hc-ping-key and --name."
+        )
+
     schedule(
+        hc_channels=hc_channel or None,
+        hc_tags=hc_tags,
         hc_ping_base_url=hc_ping_base_url,
         hc_manage_base_url=hc_manage_base_url,
         hc_ping_key=hc_ping_key,
