@@ -13,6 +13,260 @@ from scheduling_util._schedule_cli import schedule_cli
 
 
 class TestHealthchecksConfiguration(TestCase):
+    def test_configuration_failure_policy(self) -> None:
+        """
+        Warn and retain UUID pings, or raise before work, for remote update errors.
+        """
+        for policy in ("raise", "warn"):
+            for response in (
+                {"status_code": 403},
+                {"exc": requests.ConnectionError("offline")},
+            ):
+                with (
+                    self.subTest(policy=policy, response=response),
+                    requests_mock.Mocker() as mock,
+                ):
+                    mock.post(
+                        "https://healthchecks.io/api/v3/checks/check-id", **response
+                    )
+                    log = mock.post("https://hc-ping.com/check-id/log", text="OK")
+                    ping = mock.get(requests_mock.ANY, text="OK")
+                    work = Mock(return_value="success")
+                    if policy == "raise":
+                        with self.assertRaises(requests.RequestException):
+                            self.run_schedule(
+                                hc_config_failure=policy, hc_tags="backups", func=work
+                            )
+                        work.assert_not_called()
+                    else:
+                        with self.assertLogs(
+                            "scheduling_util._schedule", level="WARNING"
+                        ) as logs:
+                            self.run_schedule(
+                                hc_config_failure=policy, hc_tags="backups", func=work
+                            )
+                        self.assertIn("routing configuration failed", logs.output[0])
+                        self.assertIn(
+                            "routing configuration failed", log.last_request.text
+                        )
+                        work.assert_called_once()
+                        self.assertEqual(len(ping.request_history), 2)
+
+    def test_creation_failure_fallback(self) -> None:
+        """
+        Keep slug pings and custom endpoints after rejected or malformed creation.
+        """
+        responses: tuple[dict[str, object], ...] = (
+            {"status_code": 500},
+            {"exc": requests.ConnectionError("offline")},
+            {"json": {}},
+            {"json": []},
+            {"json": {"uuid": 42}},
+            {"text": "invalid JSON"},
+        )
+        for response in responses:
+            for policy in ("raise", "warn"):
+                with (
+                    self.subTest(response=response, policy=policy),
+                    requests_mock.Mocker() as mock,
+                ):
+                    create = mock.post("https://manage.example/api/checks/", **response)
+                    mock.post("https://ping.example/ping-key/backup/log", text="OK")
+                    pings = mock.get(requests_mock.ANY, text="OK")
+                    work = Mock(return_value="success")
+                    options = dict(
+                        hc_uuid=None,
+                        hc_ping_key="ping-key",
+                        name="backup",
+                        hc_config_failure=policy,
+                        hc_channels=("Slack #backups",),
+                        hc_manage_base_url="https://manage.example/api/",
+                        hc_ping_base_url="https://ping.example/",
+                        func=work,
+                    )
+                    if policy == "raise":
+                        with self.assertRaises((requests.RequestException, ValueError)):
+                            self.run_schedule(**options)
+                        work.assert_not_called()
+                    else:
+                        with self.assertLogs(
+                            "scheduling_util._schedule", level="WARNING"
+                        ):
+                            self.run_schedule(**options)
+                        work.assert_called_once()
+                        self.assertEqual(len(pings.request_history), 2)
+                        for request in pings.request_history:
+                            self.assertTrue(
+                                request.url.startswith(
+                                    "https://ping.example/ping-key/backup"
+                                )
+                            )
+                            self.assertEqual(request.qs["create"], ["1"])
+                    self.assertTrue(create.called)
+
+    def test_created_check_survives_routing_failure(self) -> None:
+        """
+        Retain a resolved UUID and run ID when routing fails after creation.
+        """
+        with requests_mock.Mocker() as mock:
+            mock.post(
+                "https://healthchecks.io/api/v3/checks/", json={"uuid": "created-check"}
+            )
+            mock.post(
+                "https://healthchecks.io/api/v3/checks/created-check", status_code=400
+            )
+            log = mock.post("https://hc-ping.com/created-check/log", text="OK")
+            pings = mock.get(requests_mock.ANY, text="OK")
+            work = Mock(return_value="success")
+            with self.assertLogs("scheduling_util._schedule", level="WARNING"):
+                self.run_schedule(
+                    hc_uuid=None,
+                    hc_ping_key="ping-key",
+                    name="backup",
+                    hc_channels=("missing",),
+                    hc_config_failure="warn",
+                    func=work,
+                )
+            work.assert_called_once()
+            self.assertEqual(len(pings.request_history), 2)
+            for request in pings.request_history:
+                self.assertTrue(
+                    request.url.startswith("https://hc-ping.com/created-check")
+                )
+                self.assertEqual(request.qs["rid"], log.last_request.qs["rid"])
+
+    def test_metadata_failure_policy(self) -> None:
+        """
+        Apply the policy to metadata updates that the client otherwise suppresses.
+        """
+        for policy in ("raise", "warn"):
+            with self.subTest(policy=policy), requests_mock.Mocker() as mock:
+                update = mock.post(
+                    "https://healthchecks.io/api/v3/checks/check-id", status_code=500
+                )
+                mock.post(
+                    "https://hc-ping.com/check-id/log",
+                    exc=requests.ConnectionError("log offline"),
+                )
+                mock.get(requests_mock.ANY, text="OK")
+                work = Mock(return_value="success")
+                options = dict(
+                    hc_config_failure=policy,
+                    name="backup",
+                    description="Back up",
+                    func=work,
+                    hc_timeout=timedelta(minutes=5),
+                    hc_grace=timedelta(minutes=1),
+                )
+                if policy == "raise":
+                    with self.assertRaises(requests.HTTPError):
+                        self.run_schedule(**options)
+                    work.assert_not_called()
+                else:
+                    with self.assertLogs("scheduling_util._schedule", level="WARNING"):
+                        self.run_schedule(**options)
+                    work.assert_called_once()
+                self.assertEqual(
+                    update.last_request.json(),
+                    {"name": "backup", "desc": "Back up", "timeout": 300, "grace": 60},
+                )
+
+    def test_warning_log_suppresses_exceptions(self) -> None:
+        """
+        An exception while sending a warning must not prevent work.
+        """
+        with (
+            requests_mock.Mocker() as mock,
+            patch(
+                "hcio_client.HealthCheck.ping_log",
+                side_effect=RuntimeError("log failed"),
+            ),
+        ):
+            mock.post("https://healthchecks.io/api/v3/checks/check-id", status_code=403)
+            mock.get(requests_mock.ANY, text="OK")
+            work = Mock(return_value="success")
+            with self.assertLogs("scheduling_util._schedule", level="WARNING"):
+                self.run_schedule(
+                    hc_config_failure="warn", hc_tags="backups", func=work
+                )
+            work.assert_called_once()
+
+    def test_warning_log_preserves_shutdown_signals(self) -> None:
+        """
+        Allow interrupts and explicit exits during warning delivery to stop startup.
+        """
+        for error in (KeyboardInterrupt(), SystemExit(1)):
+            with (
+                self.subTest(error=error),
+                requests_mock.Mocker() as mock,
+                patch("hcio_client.HealthCheck.ping_log", side_effect=error),
+            ):
+                mock.post(
+                    "https://healthchecks.io/api/v3/checks/check-id", status_code=403
+                )
+                work = Mock(return_value="success")
+                with (
+                    self.assertLogs("scheduling_util._schedule", level="WARNING"),
+                    self.assertRaises(type(error)),
+                ):
+                    self.run_schedule(
+                        hc_config_failure="warn", hc_tags="backups", func=work
+                    )
+                work.assert_not_called()
+
+    def test_unrelated_setup_errors_propagate(self) -> None:
+        """
+        Do not hide programming errors or interrupts in setup.
+        """
+        for error in (RuntimeError("bug"), KeyboardInterrupt()):
+            with (
+                self.subTest(error=error),
+                patch("hcio_client.HealthCheck.manage_update", side_effect=error),
+            ):
+                with self.assertRaises(type(error)):
+                    self.run_schedule(hc_config_failure="warn", hc_tags="backups")
+
+    def test_policy_validation_and_prerequisites(self) -> None:
+        """
+        Reject invalid Python policies and incomplete routing even in warning mode.
+        """
+        for options in (
+            {"hc_config_failure": "invalid"},
+            {"hc_config_failure": "warn", "hc_tags": "backups", "hc_manage_key": None},
+            {"hc_config_failure": "warn", "hc_tags": "backups", "hc_uuid": None},
+        ):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                self.run_schedule(**options)
+
+    def test_cli_failure_policy(self) -> None:
+        """
+        Forward defaults, explicit choices and environment values; reject invalid choices.
+        """
+        for args, env, expected in (
+            ([], {}, "raise"),
+            (["--hc-config-failure=raise"], {}, "raise"),
+            (["--hc-config-failure=warn"], {}, "warn"),
+            ([], {"AA_SCHEDULER_HC_CONFIG_FAILURE": "warn"}, "warn"),
+        ):
+            with (
+                self.subTest(args=args, env=env),
+                patch("scheduling_util._schedule_cli.schedule") as run,
+            ):
+                result = CliRunner().invoke(
+                    schedule_cli,
+                    [*args, "py-exec", "--code", "pass"],
+                    env=env,
+                    auto_envvar_prefix="AA_SCHEDULER",
+                )
+                self.assertEqual(result.exit_code, 0, result.output)
+                self.assertEqual(run.call_args.kwargs["hc_config_failure"], expected)
+        for value in ("invalid", "WARN"):
+            result = CliRunner().invoke(
+                schedule_cli,
+                [f"--hc-config-failure={value}", "py-exec", "--code", "pass"],
+            )
+            self.assertEqual(result.exit_code, 2)
+
     def run_schedule(self, **kwargs: object) -> None:
         """
         Run one scheduler iteration with isolated state.
