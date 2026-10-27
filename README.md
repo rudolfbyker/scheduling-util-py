@@ -222,21 +222,29 @@ schedule \
 
 ## Healthchecks notification routing
 
-Use `--hc-channel "Slack #backups"` to replace the check's notification channels.
-Repeat `--hc-channel` to assign several channels. Channel names must identify a
-unique integration; integration UUIDs are also accepted. Omitting the option
-leaves existing assignments unchanged.
+Use `--hc-channel` to replace the check's notification channels (a.k.a. integrations).
+Repeat `--hc-channel` to assign several channels.
+The channel must already exist on the Healthchecks instance and have a unique name.
+UUIDs are also accepted.
+Omitting the option leaves existing assignments unchanged.
 
 Use `--hc-tags "autoactuary backups"` to set space-separated check tags.
-Both options require `--hc-manage-key` and a check identified by `--hc-uuid`
-or by both `--name` and `--hc-ping-key`. Configuration failures stop startup
-before scheduled work runs.
 
-When invoking the Click command with `auto_envvar_prefix="AA_SCHEDULER"`, set
-`AA_SCHEDULER_HC_CHANNEL="Slack #backups"` and
-`AA_SCHEDULER_HC_TAGS="autoactuary backups"`. The channel environment variable
-holds one complete name, including spaces; use repeated CLI options for several.
+Both `--hc-channel` and `--hc-tags` require:
 
-For self-hosted Healthchecks, set `--hc-ping-base-url` and
-`--hc-manage-base-url`, including trailing slashes. Direct error reporting via
-`--slack-webhook` is configured separately.
+- a check identified by one of
+    - `--hc-uuid`
+    - both `--name` and `--hc-ping-key`
+- `--hc-manage-key` for modifying the check
+
+Configuration failures stop startup before scheduled work runs.
+
+When invoking the Click command with an automatic environment variable prefix,
+e.g., `auto_envvar_prefix="AA_SCHEDULER"`,
+you can set `AA_SCHEDULER_HC_CHANNEL="Slack #example-channel"` and `AA_SCHEDULER_HC_TAGS="foo bar"`.
+The channel environment variable holds one complete name, including spaces.
+The tags are space-separated.
+
+For self-hosted Healthchecks, set `--hc-ping-base-url` and `--hc-manage-base-url`,
+including trailing slashes.
+Direct error reporting via `--slack-webhook` is configured separately.
