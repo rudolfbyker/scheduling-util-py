@@ -6,6 +6,21 @@ My use cases for these are specific enough to warrant writing my own utilities,
 but not general enough that I would publish them on PyPI.
 Wheels are available in the GitHub releases.
 
+## Self-hosted Healthchecks
+
+Set `--hc-ping-base-url` and `--hc-manage-base-url` to use your own instance.
+Include the trailing slash in both URLs:
+
+```shell
+schedule --hc-ping-base-url https://hc.example.org/ping/ \
+  --hc-manage-base-url https://hc.example.org/api/v3/ \
+  --hc-ping-key "$PING_KEY" --hc-manage-key "$MANAGE_KEY" \
+  --name backup-job subprocess /opt/backup.sh
+```
+
+Wrappers using `auto_envvar_prefix="AA"` accept `AA_HC_PING_BASE_URL` and
+`AA_HC_MANAGE_BASE_URL`. Omitting these settings keeps the hosted service defaults.
+
 ## Run a function a fixed number of times
 
 ```doctest

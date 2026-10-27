@@ -59,6 +59,20 @@ what_is_needed_to_ping = (
     "To ping a health check, we need (the UUID) || (the slug && the ping key)."
 )
 
+click_option__hc_ping_base_url = click.option(
+    "--hc-ping-base-url",
+    default="https://hc-ping.com/",
+    show_default=True,
+    help="Base URL for Healthchecks pings, including the trailing slash.",
+)
+
+click_option__hc_manage_base_url = click.option(
+    "--hc-manage-base-url",
+    default="https://healthchecks.io/api/v3/",
+    show_default=True,
+    help="Base URL for the Healthchecks management API, including the trailing slash.",
+)
+
 click_option__hc_ping_key = click.option(
     "--hc-ping-key",
     required=False,

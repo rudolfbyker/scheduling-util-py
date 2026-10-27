@@ -16,6 +16,8 @@ from pendulum import Duration
 from run_with_logger import run_with_logger
 
 from ._click_options import (
+    click_option__hc_ping_base_url,
+    click_option__hc_manage_base_url,
     click_option__cache_dir,
     click_option__hc_ping_key,
     click_option__hc_manage_key,
@@ -56,6 +58,8 @@ def validate_exit_code_sets(
 
 
 @click.group()
+@click_option__hc_ping_base_url
+@click_option__hc_manage_base_url
 @click_option__log_level
 @click_option__hc_ping_key
 @click_option__hc_manage_key
@@ -514,6 +518,8 @@ def args_for_subprocess_run(
 def schedule_cli__on_result(
     func: Callable[[], Outcome] | None,
     *,
+    hc_ping_base_url: str,
+    hc_manage_base_url: str,
     hc_ping_key: str | None,
     hc_manage_key: str | None,
     hc_uuid: str | None,
@@ -540,6 +546,8 @@ def schedule_cli__on_result(
         return
 
     schedule(
+        hc_ping_base_url=hc_ping_base_url,
+        hc_manage_base_url=hc_manage_base_url,
         hc_ping_key=hc_ping_key,
         hc_manage_key=hc_manage_key,
         hc_uuid=hc_uuid,

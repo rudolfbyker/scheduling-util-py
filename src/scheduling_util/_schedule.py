@@ -22,6 +22,8 @@ logger = getLogger(__name__)
 
 def schedule(
     *,
+    hc_ping_base_url: str = "https://hc-ping.com/",
+    hc_manage_base_url: str = "https://healthchecks.io/api/v3/",
     hc_ping_key: str | None = None,
     hc_manage_key: str | None = None,
     hc_timeout: timedelta | None = None,
@@ -49,6 +51,8 @@ def schedule(
     Schedule a function to run at a regular interval, with health checks and error reporting.
 
     Args:
+        hc_ping_base_url: Base URL for pings, including the trailing slash.
+        hc_manage_base_url: Base URL for management requests, including the trailing slash.
         hc_ping_key:
             The ping key for `healthchecks.io`.
             To ping a health check, we need (the UUID) || (the slug && the ping key).
@@ -101,6 +105,8 @@ def schedule(
     """
 
     hc = HealthChecks(
+        ping_base_url=hc_ping_base_url,
+        manage_base_url=hc_manage_base_url,
         ping_key=hc_ping_key,
         manage_key=hc_manage_key,
         create=True,
