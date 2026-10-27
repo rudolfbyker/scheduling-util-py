@@ -237,13 +237,21 @@ Both `--hc-channel` and `--hc-tags` require:
     - both `--name` and `--hc-ping-key`
 - `--hc-manage-key` for modifying the check
 
-Configuration failures stop startup before scheduled work runs.
+Configuration failures stop startup before scheduled work runs by default (`--hc-config-failure=raise`).
+Use `--hc-config-failure=warn` to log a warning and continue scheduling with available pings.
+This applies to check creation, metadata, channels, and tags.
+Warnings are also sent to the check's log when possible.
+Failed configuration is not retried after startup.
+Missing management keys or check identities remain errors in either mode.
+
+For Python callers, use `schedule(hc_config_failure="warn", ...)`.
 
 When invoking the Click command with an automatic environment variable prefix,
 e.g., `auto_envvar_prefix="AA_SCHEDULER"`,
 you can set `AA_SCHEDULER_HC_CHANNEL="Slack #example-channel"` and `AA_SCHEDULER_HC_TAGS="foo bar"`.
 The channel environment variable holds one complete name, including spaces.
 The tags are space-separated.
+With the same prefix, set `AA_SCHEDULER_HC_CONFIG_FAILURE=warn` to continue after configuration failures.
 
 For self-hosted Healthchecks, set `--hc-ping-base-url` and `--hc-manage-base-url`,
 including trailing slashes.
