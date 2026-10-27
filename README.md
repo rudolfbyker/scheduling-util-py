@@ -219,3 +219,24 @@ schedule \
   --command=scheduling_util:hello \
   --name=World
 ```
+
+## Healthchecks notification routing
+
+Use `--hc-channel "Slack #backups"` to replace the check's notification channels.
+Repeat `--hc-channel` to assign several channels. Channel names must identify a
+unique integration; integration UUIDs are also accepted. Omitting the option
+leaves existing assignments unchanged.
+
+Use `--hc-tags "autoactuary backups"` to set space-separated check tags.
+Both options require `--hc-manage-key` and a check identified by `--hc-uuid`
+or by both `--name` and `--hc-ping-key`. Configuration failures stop startup
+before scheduled work runs.
+
+When invoking the Click command with `auto_envvar_prefix="AA_SCHEDULER"`, set
+`AA_SCHEDULER_HC_CHANNEL="Slack #backups"` and
+`AA_SCHEDULER_HC_TAGS="autoactuary backups"`. The channel environment variable
+holds one complete name, including spaces; use repeated CLI options for several.
+
+For self-hosted Healthchecks, set `--hc-ping-base-url` and
+`--hc-manage-base-url`, including trailing slashes. Direct error reporting via
+`--slack-webhook` is configured separately.
