@@ -71,6 +71,14 @@ def validate_exit_code_sets(
 @click_option__hc_channel
 @click_option__hc_tags
 @click.option(
+    "--hc-config-failure",
+    type=click.Choice(["raise", "warn"], case_sensitive=True),
+    default="raise",
+    show_default=True,
+    help="Raise on Healthchecks configuration failure, or warn and continue with available pings. "
+    "Missing configuration prerequisites remain errors.",
+)
+@click.option(
     "--interval",
     type=ClickDuration(),
     default="1m",
@@ -529,6 +537,7 @@ def schedule_cli__on_result(
     hc_uuid: str | None,
     hc_channel: tuple[str, ...],
     hc_tags: str | None,
+    hc_config_failure: Literal["raise", "warn"],
     hc_timeout: Duration | None,
     hc_grace: Duration | None,
     interval: Duration,
@@ -563,6 +572,7 @@ def schedule_cli__on_result(
     schedule(
         hc_channels=hc_channel or None,
         hc_tags=hc_tags,
+        hc_config_failure=hc_config_failure,
         hc_ping_base_url=hc_ping_base_url,
         hc_manage_base_url=hc_manage_base_url,
         hc_ping_key=hc_ping_key,

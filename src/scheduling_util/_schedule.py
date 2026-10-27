@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
+from dataclasses import replace
 from datetime import timedelta
 from logging import getLogger
 from pathlib import Path
 from time import sleep
-from typing import Literal, Callable, Any, Tuple
+from typing import Literal, Callable, Any, Tuple, TypedDict
 from uuid import uuid4
 
 from hcio_client import HealthChecks, HealthCheck
+from requests import RequestException
 
 from ._last_run import LastRun, RunPredicate
 from ._rate_limiter import RateLimiter
@@ -18,6 +20,17 @@ from ._controller_socket import ScheduleControllerSocketServer
 from ._types import Outcome
 
 logger = getLogger(__name__)
+
+
+class _HealthcheckMetadata(TypedDict):
+    """
+    Metadata sent when creating or updating a check.
+    """
+
+    name: str | None
+    desc: str | None
+    timeout: int | None
+    grace: int | None
 
 
 def schedule(
@@ -31,6 +44,7 @@ def schedule(
     hc_uuid: str | None = None,
     hc_channels: tuple[str, ...] | None = None,
     hc_tags: str | None = None,
+    hc_config_failure: Literal["raise", "warn"] = "raise",
     interval: timedelta,
     ipc_socket_path: Path | None = None,
     max_runs: int | None = None,
@@ -70,6 +84,7 @@ def schedule(
             To ping a health check, we need (the UUID) || (the slug && the ping key).
         hc_channels: Exact channel assignment; None leaves assignments unchanged.
         hc_tags: Space-separated tags; None leaves tags unchanged.
+        hc_config_failure: Raise on remote configuration failures, or warn and continue with available pings.
         interval: The amount of time to wait between runs.
         ipc_socket_path: If provided, listen on this Unix socket path for control commands.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
@@ -108,6 +123,9 @@ def schedule(
         slack_rate_limiter: Rate limiter for posting messages to Slack.
     """
 
+    if hc_config_failure not in ("raise", "warn"):
+        raise ValueError("hc_config_failure must be 'raise' or 'warn'.")
+
     configure_routing = hc_channels is not None or hc_tags is not None
     if configure_routing and not hc_manage_key:
         raise ValueError("hc_manage_key is required with hc_channels or hc_tags.")
@@ -144,12 +162,8 @@ def schedule(
     check: HealthCheck | None = (
         hc.check(
             run_id=uuid4(),
-            name=name if hc_manage_key else None,
             slug=name,
             uuid=hc_uuid,
-            desc=description,
-            timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
-            grace=int(hc_grace.total_seconds()) if hc_grace else None,
             suppress_success_ping_on_exit=True,
         )
         # To ping a health check, we need (the UUID) || (the slug && the ping key).
@@ -157,14 +171,75 @@ def schedule(
         else None
     )
 
-    if configure_routing:
+    def warn_configuration_failure(*, stage: str, error: Exception) -> None:
+        """
+        Report a setup failure locally and, if possible, in the check's log.
+
+        Args:
+            stage: Configuration operation that failed.
+            error: Failure to report.
+        """
+        message = f"Healthchecks {stage} failed; continuing with available pings: {type(error).__name__}: {error}"
+        logger.warning(message)
+        if check is not None:
+            # Warning-delivery failures must not prevent scheduled work.
+            with suppress(Exception):
+                check.ping_log(data=message)
+
+    configuration = _HealthcheckMetadata(
+        name=name if hc_manage_key else None,
+        desc=description,
+        timeout=int(hc_timeout.total_seconds()) if hc_timeout else None,
+        grace=int(hc_grace.total_seconds()) if hc_grace else None,
+    )
+    creation_failed = False
+    if (
+        check is not None
+        and hc_manage_key
+        and any(value is not None for value in configuration.values())
+    ):
+        if hc_uuid is None:
+            try:
+                check_info = hc.create_or_update(
+                    slug=name, unique=("slug",), **configuration
+                )
+                configured_uuid = check_info.get("uuid")
+                if not isinstance(configured_uuid, str) or not configured_uuid:
+                    raise ValueError(
+                        "Expected Healthchecks to return a non-empty uuid string."
+                    )
+            except (RequestException, ValueError) as error:
+                if hc_config_failure == "raise":
+                    raise
+                creation_failed = True
+                warn_configuration_failure(stage="check creation", error=error)
+            else:
+                check = replace(check, uuid=configured_uuid, create=None)
+        else:
+            try:
+                check.manage_update(
+                    **configuration,
+                    raise_for_status=True,
+                    raise_for_failed_request=True,
+                )
+            except RequestException as error:
+                if hc_config_failure == "raise":
+                    raise
+                warn_configuration_failure(stage="metadata configuration", error=error)
+
+    if configure_routing and not creation_failed:
         assert check is not None
-        check.manage_update(
-            channels=list(hc_channels) if hc_channels is not None else None,
-            tags=hc_tags,
-            raise_for_status=True,
-            raise_for_failed_request=True,
-        )
+        try:
+            check.manage_update(
+                channels=list(hc_channels) if hc_channels is not None else None,
+                tags=hc_tags,
+                raise_for_status=True,
+                raise_for_failed_request=True,
+            )
+        except RequestException as error:
+            if hc_config_failure == "raise":
+                raise
+            warn_configuration_failure(stage="routing configuration", error=error)
 
     should_run = RunPredicate(
         success_period=success_period,
