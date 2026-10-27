@@ -208,3 +208,35 @@ click_option__exit_codes_neutral = click.option(
     "No ping (neither success nor failure) will be sent if the subprocess exits with one of these.",
     callback=create_click_csv_callback(value_callback=int),
 )
+
+
+class HealthchecksChannel(click.types.StringParamType):
+    """
+    Preserve a complete channel name when reading an auto-prefixed environment variable.
+    """
+
+    def split_envvar_value(self, rv: str) -> list[str]:
+        """
+        Read one channel name, including spaces.
+
+        Args:
+            rv: Environment variable value.
+
+        Returns:
+            The single channel name.
+        """
+        return [rv]
+
+
+click_option__hc_channel = click.option(
+    "--hc-channel",
+    multiple=True,
+    type=HealthchecksChannel(),
+    help="Exact Healthchecks channel assignment. Repeat for multiple channels. Requires --hc-manage-key.",
+)
+
+click_option__hc_tags = click.option(
+    "--hc-tags",
+    type=str,
+    help="Space-separated Healthchecks tags. Requires --hc-manage-key.",
+)

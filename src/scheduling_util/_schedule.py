@@ -29,6 +29,8 @@ def schedule(
     hc_timeout: timedelta | None = None,
     hc_grace: timedelta | None = None,
     hc_uuid: str | None = None,
+    hc_channels: tuple[str, ...] | None = None,
+    hc_tags: str | None = None,
     interval: timedelta,
     ipc_socket_path: Path | None = None,
     max_runs: int | None = None,
@@ -66,6 +68,8 @@ def schedule(
         hc_uuid:
             The UUID of the health check.
             To ping a health check, we need (the UUID) || (the slug && the ping key).
+        hc_channels: Exact channel assignment; None leaves assignments unchanged.
+        hc_tags: Space-separated tags; None leaves tags unchanged.
         interval: The amount of time to wait between runs.
         ipc_socket_path: If provided, listen on this Unix socket path for control commands.
         max_runs: The maximum number of runs before exiting. If `None`, run indefinitely.
@@ -103,6 +107,14 @@ def schedule(
         slack_webhook: If provided, errors will be posted to this Slack webhook URL.
         slack_rate_limiter: Rate limiter for posting messages to Slack.
     """
+
+    configure_routing = hc_channels is not None or hc_tags is not None
+    if configure_routing and not hc_manage_key:
+        raise ValueError("hc_manage_key is required with hc_channels or hc_tags.")
+    if configure_routing and not (hc_uuid or (hc_ping_key and name)):
+        raise ValueError(
+            "hc_channels and hc_tags require hc_uuid or both hc_ping_key and name."
+        )
 
     hc = HealthChecks(
         ping_base_url=hc_ping_base_url,
@@ -144,6 +156,15 @@ def schedule(
         if (hc_uuid or (hc_ping_key and name))
         else None
     )
+
+    if configure_routing:
+        assert check is not None
+        check.manage_update(
+            channels=list(hc_channels) if hc_channels is not None else None,
+            tags=hc_tags,
+            raise_for_status=True,
+            raise_for_failed_request=True,
+        )
 
     should_run = RunPredicate(
         success_period=success_period,

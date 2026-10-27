@@ -11,7 +11,7 @@ dependencies = [
     "click==8.*",
     "click_pendulum==0.*",
     "coloredlogs==15.*",
-    "hcio_client==1.*,>=1.0.1",
+    "hcio_client==1.*,>=1.1.0",
     "ordered_set==4.*",
     "pendulum==3.*",
     "pydantic==2.*",
